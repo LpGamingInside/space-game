@@ -23,6 +23,10 @@ io.on("connection", (socket) => {
         x: 400,
         y: 300,
         angle: 0,
+        targetAngle: 0,
+        speed: 0,
+        vx: 0,
+        vy: 0,
         color: "#4da6ff"
     };
 

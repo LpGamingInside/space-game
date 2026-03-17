@@ -50,19 +50,12 @@
         const players = {};
         let myId = null;
 
-        const SHIP_SPEED = 4;
-        const STOP_DISTANCE = 6;
-
         let mouseX = 0;
         let mouseY = 0;
-
         let mouseDown = false;
-        let holdMode = false;
         let targetMode = false;
-
         let targetX = 0;
         let targetY = 0;
-
         let mouseDownTime = 0;
         let movedWhileHolding = false;
 
@@ -77,11 +70,6 @@
                 x: event.clientX - rect.left,
                 y: event.clientY - rect.top
             };
-        }
-
-        function clampPlayer(p) {
-            p.x = Math.max(12, Math.min(canvas.width - 12, p.x));
-            p.y = Math.max(18, Math.min(canvas.height - 12, p.y));
         }
 
         function drawStars() {
@@ -117,60 +105,65 @@
             ctx.restore();
         }
 
-        function sendMyPosition() {
+        function updateMovement() {
+            if (!myId || !players[myId]) return;
+
             const me = players[myId];
-            if (!me) return;
+
+            if (typeof me.speed !== "number") me.speed = 0;
+            if (typeof me.vx !== "number") me.vx = 0;
+            if (typeof me.vy !== "number") me.vy = 0;
+            if (typeof me.angle !== "number") me.angle = 0;
+
+            let targetXLocal = me.x;
+            let targetYLocal = me.y;
+
+            if (mouseDown) {
+                targetXLocal = mouseX;
+                targetYLocal = mouseY;
+            } else if (targetMode) {
+                targetXLocal = targetX;
+                targetYLocal = targetY;
+            } else {
+                me.speed *= 0.9;
+            }
+
+            const dx = targetXLocal - me.x;
+            const dy = targetYLocal - me.y;
+            const distance = Math.hypot(dx, dy);
+
+            if (distance > 3) {
+                const desiredAngle = Math.atan2(dy, dx) + Math.PI / 2;
+
+                let diff = desiredAngle - me.angle;
+                diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+                me.angle += diff * 0.15;
+
+                me.speed += 0.3;
+                me.speed = Math.min(me.speed, 5);
+
+                me.vx = Math.sin(me.angle) * me.speed;
+                me.vy = -Math.cos(me.angle) * me.speed;
+            } else {
+                if (targetMode) {
+                    targetMode = false;
+                }
+                me.speed *= 0.85;
+                me.vx *= 0.85;
+                me.vy *= 0.85;
+            }
+
+            me.x += me.vx;
+            me.y += me.vy;
+
+            me.x = Math.max(10, Math.min(canvas.width - 10, me.x));
+            me.y = Math.max(10, Math.min(canvas.height - 10, me.y));
 
             socket.emit("move", {
                 x: me.x,
                 y: me.y,
-                angle: me.angle || 0
+                angle: me.angle
             });
-        }
-
-        function moveMyShipTowards(destX, destY, stopAtTarget = false) {
-            const me = players[myId];
-            if (!me) return true;
-
-            const dx = destX - me.x;
-            const dy = destY - me.y;
-            const distance = Math.hypot(dx, dy);
-
-            if (distance === 0) return true;
-
-            me.angle = Math.atan2(dy, dx) + Math.PI / 2;
-
-            if (stopAtTarget && distance <= STOP_DISTANCE) {
-                me.x = destX;
-                me.y = destY;
-                clampPlayer(me);
-                sendMyPosition();
-                return true;
-            }
-
-            const step = Math.min(SHIP_SPEED, distance);
-            me.x += (dx / distance) * step;
-            me.y += (dy / distance) * step;
-
-            clampPlayer(me);
-            sendMyPosition();
-            return false;
-        }
-
-        function updateMovement() {
-            if (!myId || !players[myId]) return;
-
-            if (holdMode && mouseDown) {
-                moveMyShipTowards(mouseX, mouseY, false);
-                return;
-            }
-
-            if (targetMode) {
-                const reached = moveMyShipTowards(targetX, targetY, true);
-                if (reached) {
-                    targetMode = false;
-                }
-            }
         }
 
         function gameLoop() {
@@ -247,8 +240,6 @@
             mouseDown = true;
             mouseDownTime = Date.now();
             movedWhileHolding = false;
-
-            holdMode = true;
             targetMode = false;
         });
 
@@ -262,20 +253,16 @@
             const holdDuration = Date.now() - mouseDownTime;
 
             mouseDown = false;
-            holdMode = false;
 
             if (holdDuration < 180 && !movedWhileHolding) {
                 targetX = pos.x;
                 targetY = pos.y;
                 targetMode = true;
-            } else {
-                targetMode = false;
             }
         });
 
         canvas.addEventListener("mouseleave", () => {
             mouseDown = false;
-            holdMode = false;
         });
 
         window.addEventListener("resize", resizeCanvas);
