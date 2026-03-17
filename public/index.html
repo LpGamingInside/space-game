@@ -21,10 +21,11 @@
             position: fixed;
             top: 10px;
             left: 10px;
-            background: rgba(0, 0, 0, 0.5);
+            background: rgba(0, 0, 0, 0.55);
             padding: 10px 14px;
             border-radius: 10px;
             z-index: 10;
+            line-height: 1.4;
         }
         
         canvas {
@@ -46,11 +47,42 @@
         const canvas = document.getElementById("game");
         const ctx = canvas.getContext("2d");
         const hud = document.getElementById("hud");
+
         const WORLD_WIDTH = 5000;
         const WORLD_HEIGHT = 5000;
+        const MAX_SPEED = 5;
 
         const players = {};
         let myId = null;
+
+        const npcs = [{
+            id: 1,
+            x: 900,
+            y: 900,
+            radius: 22,
+            hp: 100,
+            maxHp: 100,
+            color: "#ff9933"
+        }, {
+            id: 2,
+            x: 1400,
+            y: 1100,
+            radius: 22,
+            hp: 100,
+            maxHp: 100,
+            color: "#ff9933"
+        }, {
+            id: 3,
+            x: 1800,
+            y: 1500,
+            radius: 22,
+            hp: 100,
+            maxHp: 100,
+            color: "#ff9933"
+        }];
+
+        let selectedNpcId = null;
+        let attacking = false;
 
         let mouseX = 0;
         let mouseY = 0;
@@ -66,6 +98,22 @@
             canvas.height = window.innerHeight;
         }
 
+        function getCameraOffset() {
+            if (!myId || !players[myId]) {
+                return {
+                    x: 0,
+                    y: 0
+                };
+            }
+
+            const me = players[myId];
+
+            return {
+                x: me.x - canvas.width / 2,
+                y: me.y - canvas.height / 2
+            };
+        }
+
         function getMousePos(event) {
             const rect = canvas.getBoundingClientRect();
             const camera = getCameraOffset();
@@ -74,6 +122,19 @@
                 x: (event.clientX - rect.left) + camera.x,
                 y: (event.clientY - rect.top) + camera.y
             };
+        }
+
+        function getNpcAtPosition(worldX, worldY) {
+            for (const npc of npcs) {
+                const dx = worldX - npc.x;
+                const dy = worldY - npc.y;
+                const distance = Math.hypot(dx, dy);
+
+                if (distance <= npc.radius) {
+                    return npc;
+                }
+            }
+            return null;
         }
 
         function drawStars(camera) {
@@ -110,20 +171,30 @@
             ctx.restore();
         }
 
-        function getCameraOffset() {
-            if (!myId || !players[myId]) {
-                return {
-                    x: 0,
-                    y: 0
-                };
+        function drawNpc(npc, camera) {
+            const screenX = npc.x - camera.x;
+            const screenY = npc.y - camera.y;
+
+            ctx.beginPath();
+            ctx.arc(screenX, screenY, npc.radius, 0, Math.PI * 2);
+            ctx.fillStyle = npc.color;
+            ctx.fill();
+
+            if (npc.id === selectedNpcId) {
+                ctx.strokeStyle = "#00ff88";
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                const barWidth = 50;
+                const barHeight = 6;
+                const hpRatio = npc.hp / npc.maxHp;
+
+                ctx.fillStyle = "#222";
+                ctx.fillRect(screenX - barWidth / 2, screenY - 36, barWidth, barHeight);
+
+                ctx.fillStyle = "#ff4444";
+                ctx.fillRect(screenX - barWidth / 2, screenY - 36, barWidth * hpRatio, barHeight);
             }
-
-            const me = players[myId];
-
-            return {
-                x: me.x - canvas.width / 2,
-                y: me.y - canvas.height / 2
-            };
         }
 
         function updateMovement() {
@@ -154,21 +225,18 @@
             const distance = Math.hypot(dx, dy);
 
             if (distance > 3) {
-                const desiredAngle = Math.atan2(dy, dx) + Math.PI / 2;
-
-                let diff = desiredAngle - me.angle;
-                diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-                me.angle += diff * 0.15;
-
                 me.speed += 0.3;
-                me.speed = Math.min(me.speed, 5);
+                me.speed = Math.min(me.speed, MAX_SPEED);
 
-                me.vx = Math.sin(me.angle) * me.speed;
-                me.vy = -Math.cos(me.angle) * me.speed;
+                const moveAngle = Math.atan2(dy, dx);
+
+                me.vx = Math.cos(moveAngle) * me.speed;
+                me.vy = Math.sin(moveAngle) * me.speed;
             } else {
                 if (targetMode) {
                     targetMode = false;
                 }
+
                 me.speed *= 0.85;
                 me.vx *= 0.85;
                 me.vy *= 0.85;
@@ -180,11 +248,46 @@
             me.x = Math.max(10, Math.min(WORLD_WIDTH - 10, me.x));
             me.y = Math.max(10, Math.min(WORLD_HEIGHT - 10, me.y));
 
+            if (attacking && selectedNpcId !== null) {
+                const npc = npcs.find(n => n.id === selectedNpcId);
+
+                if (npc) {
+                    const aimDx = npc.x - me.x;
+                    const aimDy = npc.y - me.y;
+                    me.angle = Math.atan2(aimDy, aimDx) + Math.PI / 2;
+                }
+            } else {
+                if (Math.abs(me.vx) > 0.01 || Math.abs(me.vy) > 0.01) {
+                    me.angle = Math.atan2(me.vy, me.vx) + Math.PI / 2;
+                }
+            }
+
             socket.emit("move", {
                 x: me.x,
                 y: me.y,
                 angle: me.angle
             });
+        }
+
+        function updateHud() {
+            if (!myId || !players[myId]) {
+                hud.textContent = "Verbinde...";
+                return;
+            }
+
+            let text = "Verbunden";
+
+            if (selectedNpcId !== null) {
+                text += " | Ziel: NPC " + selectedNpcId;
+            }
+
+            if (attacking) {
+                text += " | Angriff aktiv";
+            }
+
+            text += " | ESC = Ziel löschen | STRG = Angriff an/aus";
+
+            hud.textContent = text;
         }
 
         function gameLoop() {
@@ -201,6 +304,10 @@
                 WORLD_HEIGHT
             );
 
+            for (const npc of npcs) {
+                drawNpc(npc, camera);
+            }
+
             for (const id in players) {
                 const p = players[id];
 
@@ -213,6 +320,7 @@
                 );
             }
 
+            updateHud();
             requestAnimationFrame(gameLoop);
         }
 
@@ -269,10 +377,29 @@
             mouseX = pos.x;
             mouseY = pos.y;
 
+            const clickedNpc = getNpcAtPosition(pos.x, pos.y);
+
+            if (clickedNpc) {
+                selectedNpcId = clickedNpc.id;
+                mouseDown = false;
+                targetMode = false;
+                return;
+            }
+
             mouseDown = true;
             mouseDownTime = Date.now();
             movedWhileHolding = false;
             targetMode = false;
+        });
+
+        canvas.addEventListener("dblclick", (event) => {
+            const pos = getMousePos(event);
+            const clickedNpc = getNpcAtPosition(pos.x, pos.y);
+
+            if (clickedNpc) {
+                selectedNpcId = clickedNpc.id;
+                attacking = true;
+            }
         });
 
         canvas.addEventListener("mouseup", (event) => {
@@ -295,6 +422,19 @@
 
         canvas.addEventListener("mouseleave", () => {
             mouseDown = false;
+        });
+
+        window.addEventListener("keydown", (event) => {
+            if (event.key === "Control") {
+                if (selectedNpcId !== null) {
+                    attacking = !attacking;
+                }
+            }
+
+            if (event.key === "Escape") {
+                attacking = false;
+                selectedNpcId = null;
+            }
         });
 
         window.addEventListener("resize", resizeCanvas);
