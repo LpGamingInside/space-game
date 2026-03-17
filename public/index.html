@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Space Game</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            background: black;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+        
+        #hud {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 14px;
+            border-radius: 10px;
+            z-index: 10;
+        }
+        
+        canvas {
+            display: block;
+            background: radial-gradient(circle at 20% 20%, #1a1a2e 0%, #050510 35%, #000000 100%);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="hud">Verbinde...</div>
+    <canvas id="game"></canvas>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        const canvas = document.getElementById("game");
+        const ctx = canvas.getContext("2d");
+        const hud = document.getElementById("hud");
+
+        const players = {};
+        let myId = null;
+
+        const keys = {
+            w: false,
+            a: false,
+            s: false,
+            d: false
+        };
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        function drawStars() {
+            for (let i = 0; i < 100; i++) {
+                const x = (i * 97) % canvas.width;
+                const y = (i * 53) % canvas.height;
+                ctx.fillStyle = "white";
+                ctx.fillRect(x, y, 2, 2);
+            }
+        }
+
+        function drawShip(x, y, color, isMe) {
+            ctx.save();
+            ctx.translate(x, y);
+
+            ctx.beginPath();
+            ctx.moveTo(0, -15);
+            ctx.lineTo(10, 12);
+            ctx.lineTo(0, 6);
+            ctx.lineTo(-10, 12);
+            ctx.closePath();
+
+            ctx.fillStyle = color;
+            ctx.fill();
+
+            if (isMe) {
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawStars();
+
+            for (const id in players) {
+                const p = players[id];
+                drawShip(p.x, p.y, p.color || "#4da6ff", id === myId);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function updateMovement() {
+            if (!myId || !players[myId]) return;
+
+            const speed = 4;
+            let moved = false;
+
+            if (keys.w) {
+                players[myId].y -= speed;
+                moved = true;
+            }
+            if (keys.s) {
+                players[myId].y += speed;
+                moved = true;
+            }
+            if (keys.a) {
+                players[myId].x -= speed;
+                moved = true;
+            }
+            if (keys.d) {
+                players[myId].x += speed;
+                moved = true;
+            }
+
+            players[myId].x = Math.max(10, Math.min(canvas.width - 10, players[myId].x));
+            players[myId].y = Math.max(15, Math.min(canvas.height - 12, players[myId].y));
+
+            if (moved) {
+                socket.emit("move", {
+                    x: players[myId].x,
+                    y: players[myId].y
+                });
+            }
+        }
+
+        socket.on("connect", () => {
+            myId = socket.id;
+            hud.textContent = "Verbunden als: " + myId;
+        });
+
+        socket.on("currentPlayers", (serverPlayers) => {
+            for (const id in serverPlayers) {
+                players[id] = serverPlayers[id];
+            }
+        });
+
+        socket.on("newPlayer", (player) => {
+            players[player.id] = player;
+        });
+
+        socket.on("playerMoved", (player) => {
+            if (!players[player.id]) {
+                players[player.id] = {
+                    x: player.x,
+                    y: player.y,
+                    color: "#4da6ff"
+                };
+            } else {
+                players[player.id].x = player.x;
+                players[player.id].y = player.y;
+            }
+        });
+
+        socket.on("playerDisconnected", (id) => {
+            delete players[id];
+        });
+
+        window.addEventListener("keydown", (e) => {
+            const key = e.key.toLowerCase();
+            if (key in keys) keys[key] = true;
+        });
+
+        window.addEventListener("keyup", (e) => {
+            const key = e.key.toLowerCase();
+            if (key in keys) keys[key] = false;
+        });
+
+        window.addEventListener("resize", resizeCanvas);
+
+        resizeCanvas();
+        setInterval(updateMovement, 1000 / 60);
+        gameLoop();
+    </script>
+</body>
+
+</html>
