@@ -25,8 +25,8 @@ const activeShip = getActiveShip(save);
 //let credits = save.credits;
 //let crystals = save.crystals;
 
-let credits = 999999;
-let crystals = 999999;
+let credits = 9999999;
+let crystals = 9999999;
 let xp = save.xp;
 let level = save.level;
 
@@ -46,6 +46,7 @@ let targetX = 0;
 let targetY = 0;
 let mouseDownTime = 0;
 let movedWhileHolding = false;
+let droneRotation = 0;
 
 const npcs = window.GAME_DATA.npcs.map((npc) => {
     return {
@@ -67,7 +68,8 @@ function getLoadoutStats() {
         laserSlots: 1,
         generatorSlots: 1,
         extraSlots: 1,
-        droneSlots: 0
+        droneSlots: 0,
+        color: "#60a5fa"
     };
 
     ensureShipLoadout(save, save.activeShipId);
@@ -237,7 +239,7 @@ function drawStars(camera) {
     }
 }
 
-function drawShip(x, y, angle, color, isMe, isDead) {
+function drawShipSprite(x, y, angle, color, isMe, isDead) {
     if (isDead) return;
 
     ctx.save();
@@ -245,14 +247,25 @@ function drawShip(x, y, angle, color, isMe, isDead) {
     ctx.rotate(angle);
 
     ctx.beginPath();
-    ctx.moveTo(0, -20);
-    ctx.lineTo(12, 13);
-    ctx.lineTo(0, 7);
-    ctx.lineTo(-12, 13);
+    ctx.moveTo(0, -24);
+    ctx.lineTo(15, 16);
+    ctx.lineTo(0, 8);
+    ctx.lineTo(-15, 16);
     ctx.closePath();
-
     ctx.fillStyle = color;
     ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(7, 10);
+    ctx.lineTo(0, 6);
+    ctx.lineTo(-7, 10);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(255,255,255,0.22)";
+    ctx.fill();
+
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(-4, 8, 8, 12);
 
     if (isMe) {
         ctx.strokeStyle = "#ffffff";
@@ -261,6 +274,49 @@ function drawShip(x, y, angle, color, isMe, isDead) {
     }
 
     ctx.restore();
+}
+
+function drawDrones(player, camera, isMe) {
+    if (!isMe || player.isDead) return;
+
+    ensureShipLoadout(save, save.activeShipId);
+    const droneIds = save.loadouts[save.activeShipId].drones;
+    const count = droneIds.length;
+
+    if (count === 0) return;
+
+    const centerX = player.x - camera.x;
+    const centerY = player.y - camera.y;
+    const orbitRadius = 34 + count * 2;
+
+    for (let i = 0; i < count; i++) {
+        const droneId = droneIds[i];
+        const item = getEquipmentById("drones", droneId);
+        const color = item && item.color ? item.color : "#93c5fd";
+
+        const angle = droneRotation + (Math.PI * 2 / count) * i;
+        const dx = Math.cos(angle) * orbitRadius;
+        const dy = Math.sin(angle) * orbitRadius;
+
+        ctx.save();
+        ctx.translate(centerX + dx, centerY + dy);
+        ctx.rotate(angle + Math.PI / 2);
+
+        ctx.beginPath();
+        ctx.moveTo(0, -8);
+        ctx.lineTo(6, 6);
+        ctx.lineTo(0, 3);
+        ctx.lineTo(-6, 6);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+
+        ctx.strokeStyle = "#ffffffaa";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.restore();
+    }
 }
 
 function drawPlayerHpBar(player, camera, isMe) {
@@ -274,10 +330,10 @@ function drawPlayerHpBar(player, camera, isMe) {
     const hpRatio = Math.max(0, player.hp) / player.maxHp;
 
     ctx.fillStyle = "#222";
-    ctx.fillRect(screenX - barWidth / 2, screenY - 36, barWidth, barHeight);
+    ctx.fillRect(screenX - barWidth / 2, screenY - 40, barWidth, barHeight);
 
     ctx.fillStyle = isMe ? "#4ade80" : "#60a5fa";
-    ctx.fillRect(screenX - barWidth / 2, screenY - 36, barWidth * hpRatio, barHeight);
+    ctx.fillRect(screenX - barWidth / 2, screenY - 40, barWidth * hpRatio, barHeight);
 }
 
 function drawNpc(npc, camera) {
@@ -287,6 +343,11 @@ function drawNpc(npc, camera) {
     ctx.beginPath();
     ctx.arc(screenX, screenY, npc.radius, 0, Math.PI * 2);
     ctx.fillStyle = npc.color;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, npc.radius * 0.45, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.15)";
     ctx.fill();
 
     if (npc.id === selectedNpcId) {
@@ -373,7 +434,7 @@ function drawMinimap() {
         const x = (p.x / WORLD_WIDTH) * minimapCanvas.width;
         const y = (p.y / WORLD_HEIGHT) * minimapCanvas.height;
 
-        minimapCtx.fillStyle = id === myId ? "#60a5fa" : "#ffffff";
+        minimapCtx.fillStyle = id === myId ? (activeShip ? activeShip.color : "#60a5fa") : "#ffffff";
         minimapCtx.beginPath();
         minimapCtx.arc(x, y, id === myId ? 4 : 3, 0, Math.PI * 2);
         minimapCtx.fill();
@@ -461,11 +522,8 @@ function updateNpcMovement() {
         if (me && !me.isDead) {
             const distToPlayer = distanceBetween(npc.x, npc.y, me.x, me.y);
 
-            if (distToPlayer <= NPC_CHASE_RANGE) {
-                npc.state = "chase";
-            } else if (distToPlayer >= NPC_LOSE_RANGE) {
-                npc.state = "return";
-            }
+            if (distToPlayer <= NPC_CHASE_RANGE) npc.state = "chase";
+            else if (distToPlayer >= NPC_LOSE_RANGE) npc.state = "return";
 
             if (npc.state === "chase") {
                 targetXLocal = me.x;
@@ -647,6 +705,10 @@ function updateExplosions() {
     }
 }
 
+function updateDroneAnimation() {
+    droneRotation += 0.025;
+}
+
 function updateHud() {
     const me = getMyPlayer();
 
@@ -705,7 +767,9 @@ function gameLoop() {
         const p = players[id];
         const isMe = id === myId;
 
-        drawShip(
+        drawDrones(p, camera, isMe);
+
+        drawShipSprite(
             p.x - camera.x,
             p.y - camera.y,
             p.angle || 0,
@@ -874,5 +938,6 @@ setInterval(updateNpcCombat, 1000 / 60);
 setInterval(updateLasers, 1000 / 60);
 setInterval(updateExplosions, 1000 / 60);
 setInterval(updateRespawn, 200);
+setInterval(updateDroneAnimation, 1000 / 60);
 
 gameLoop();

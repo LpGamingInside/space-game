@@ -9,10 +9,27 @@ const inventoryPanel = document.getElementById("inventoryPanel");
 function getShipSvg(color) {
     return `
         <svg viewBox="0 0 100 100" aria-hidden="true">
-            <polygon points="50,12 68,78 50,62 32,78" fill="${color}"></polygon>
-            <polygon points="50,30 58,60 50,54 42,60" fill="#ffffff22"></polygon>
+            <defs>
+                <linearGradient id="shipGrad" x1="0" x2="1">
+                    <stop offset="0%" stop-color="${color}"></stop>
+                    <stop offset="100%" stop-color="#ffffff"></stop>
+                </linearGradient>
+            </defs>
+            <polygon points="50,10 72,78 50,60 28,78" fill="url(#shipGrad)"></polygon>
+            <polygon points="50,26 60,58 50,52 40,58" fill="#ffffff33"></polygon>
+            <rect x="45" y="60" width="10" height="14" rx="3" fill="#0f172a"></rect>
         </svg>
     `;
+}
+
+function getItemIcon(category) {
+    const icons = {
+        lasers: "⚡",
+        generators: "🛡️",
+        extras: "✦",
+        drones: "◈"
+    };
+    return icons[category] || "•";
 }
 
 function renderResources() {
@@ -148,7 +165,6 @@ function equipItem(category, itemId) {
     const meta = getCategoryMeta(category, ship);
 
     if (loadout[category].length >= meta.max) return;
-
     if (!removeOneItem(save.inventory[category], itemId)) return;
 
     loadout[category].push(itemId);
@@ -166,6 +182,23 @@ function unequipItem(category, itemId) {
     save.inventory[category].push(itemId);
     saveGame(save);
     renderAll();
+}
+
+function makeItemRow(category, itemId, buttonText, onClick) {
+    const item = getEquipmentById(category, itemId);
+
+    const row = document.createElement("div");
+    row.className = "slot-item-row";
+    row.innerHTML = `
+        <div class="slot-item-left">
+            <span class="icon-badge">${getItemIcon(category)}</span>
+            <span>${item ? item.name : itemId}</span>
+        </div>
+        <button class="btn small ${buttonText === "Entfernen" ? "secondary" : ""}">${buttonText}</button>
+    `;
+
+    row.querySelector("button").addEventListener("click", onClick);
+    return row;
 }
 
 function renderLoadoutCategory(category) {
@@ -196,15 +229,9 @@ function renderLoadoutCategory(category) {
         equippedContainer.innerHTML = `<div class="inventory-line"><span>-</span></div>`;
     } else {
         for (const itemId of equipped) {
-            const item = getEquipmentById(category, itemId);
-            const row = document.createElement("div");
-            row.className = "inventory-line";
-            row.innerHTML = `
-                <span>${item ? item.name : itemId}</span>
-                <button class="btn small secondary">Entfernen</button>
-            `;
-            row.querySelector("button").addEventListener("click", () => unequipItem(category, itemId));
-            equippedContainer.appendChild(row);
+            equippedContainer.appendChild(
+                makeItemRow(category, itemId, "Entfernen", () => unequipItem(category, itemId))
+            );
         }
     }
 
@@ -214,17 +241,12 @@ function renderLoadoutCategory(category) {
         inventoryContainer.innerHTML = `<div class="inventory-line"><span>-</span></div>`;
     } else {
         for (const itemId of inventoryKeys) {
-            const item = getEquipmentById(category, itemId);
             const amount = inventoryCounts[itemId];
-
-            const row = document.createElement("div");
-            row.className = "inventory-line";
-            row.innerHTML = `
-                <span>${item ? item.name : itemId} x${amount}</span>
-                <button class="btn small">Ausrüsten</button>
-            `;
-            row.querySelector("button").addEventListener("click", () => equipItem(category, itemId));
-            inventoryContainer.appendChild(row);
+            const wrapper = document.createElement("div");
+            wrapper.appendChild(
+                makeItemRow(category, itemId, `Ausrüsten x${amount}`, () => equipItem(category, itemId))
+            );
+            inventoryContainer.appendChild(wrapper.firstChild);
         }
     }
 
@@ -273,7 +295,7 @@ function renderInventoryPanel() {
                 const item = getEquipmentById(category, itemId);
                 inner += `
                     <div class="inventory-line">
-                        <span>${item ? item.name : itemId}</span>
+                        <span><span class="icon-badge">${getItemIcon(category)}</span>${item ? item.name : itemId}</span>
                         <span>x${counts[itemId]}</span>
                     </div>
                 `;

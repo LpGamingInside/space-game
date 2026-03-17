@@ -59,9 +59,24 @@ window.GAME_DATA = {
             { id: "RNG-2", name: "Range Booster II", rangeBonus: 160, priceCredits: 2600, priceCrystals: 55 },
             { id: "REP-1", name: "Repair Module I", rangeBonus: 0, hpBonus: 25, priceCredits: 1400, priceCrystals: 25 }
         ],
-        drones: [
-            { id: "DRN-1", name: "Drone Alpha", damageBonus: 2, hpBonus: 10, priceCredits: 1500, priceCrystals: 40 },
-            { id: "DRN-2", name: "Drone Beta", damageBonus: 4, hpBonus: 20, priceCredits: 3800, priceCrystals: 90 }
+        drones: [{
+                id: "DRN-1",
+                name: "Drone Alpha",
+                damageBonus: 2,
+                hpBonus: 10,
+                color: "#93c5fd",
+                priceCredits: 1500,
+                priceCrystals: 40
+            },
+            {
+                id: "DRN-2",
+                name: "Drone Beta",
+                damageBonus: 4,
+                hpBonus: 20,
+                color: "#f9a8d4",
+                priceCredits: 3800,
+                priceCrystals: 90
+            }
         ]
     },
 
