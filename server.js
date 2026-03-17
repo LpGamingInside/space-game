@@ -8,7 +8,6 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
-
 const players = {};
 
 app.use(express.static(path.join(__dirname, "public")));
@@ -39,13 +38,13 @@ io.on("connection", (socket) => {
 
         players[socket.id].x = data.x;
         players[socket.id].y = data.y;
-        players[socket.id].angle = data.angle ? ? 0;
+        players[socket.id].angle = data.angle || 0;
 
         socket.broadcast.emit("playerMoved", {
             id: socket.id,
             x: data.x,
             y: data.y,
-            angle: data.angle ? ? 0
+            angle: data.angle || 0
         });
     });
 

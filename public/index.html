@@ -50,14 +50,21 @@
         const players = {};
         let myId = null;
 
+        const SHIP_SPEED = 4;
+        const STOP_DISTANCE = 6;
+
         let mouseX = 0;
         let mouseY = 0;
-        let mouseHeld = false;
-        let clickMoveActive = false;
-        let clickTargetX = 0;
-        let clickTargetY = 0;
 
-        const SHIP_SPEED = 4;
+        let mouseDown = false;
+        let holdMode = false;
+        let targetMode = false;
+
+        let targetX = 0;
+        let targetY = 0;
+
+        let mouseDownTime = 0;
+        let movedWhileHolding = false;
 
         function resizeCanvas() {
             canvas.width = window.innerWidth;
@@ -72,8 +79,13 @@
             };
         }
 
+        function clampPlayer(p) {
+            p.x = Math.max(12, Math.min(canvas.width - 12, p.x));
+            p.y = Math.max(18, Math.min(canvas.height - 12, p.y));
+        }
+
         function drawStars() {
-            for (let i = 0; i < 100; i++) {
+            for (let i = 0; i < 120; i++) {
                 const x = (i * 97) % canvas.width;
                 const y = (i * 53) % canvas.height;
                 ctx.fillStyle = "white";
@@ -105,65 +117,59 @@
             ctx.restore();
         }
 
-        function clampPlayer(p) {
-            p.x = Math.max(12, Math.min(canvas.width - 12, p.x));
-            p.y = Math.max(18, Math.min(canvas.height - 12, p.y));
+        function sendMyPosition() {
+            const me = players[myId];
+            if (!me) return;
+
+            socket.emit("move", {
+                x: me.x,
+                y: me.y,
+                angle: me.angle || 0
+            });
         }
 
-        function moveTowardsTarget(targetX, targetY) {
-            if (!myId || !players[myId]) return;
-
+        function moveMyShipTowards(destX, destY, stopAtTarget = false) {
             const me = players[myId];
-            const dx = targetX - me.x;
-            const dy = targetY - me.y;
+            if (!me) return true;
+
+            const dx = destX - me.x;
+            const dy = destY - me.y;
             const distance = Math.hypot(dx, dy);
 
-            if (distance < 1) return;
+            if (distance === 0) return true;
 
-            const angle = Math.atan2(dy, dx) + Math.PI / 2;
-            me.angle = angle;
+            me.angle = Math.atan2(dy, dx) + Math.PI / 2;
+
+            if (stopAtTarget && distance <= STOP_DISTANCE) {
+                me.x = destX;
+                me.y = destY;
+                clampPlayer(me);
+                sendMyPosition();
+                return true;
+            }
 
             const step = Math.min(SHIP_SPEED, distance);
             me.x += (dx / distance) * step;
             me.y += (dy / distance) * step;
 
             clampPlayer(me);
-
-            socket.emit("move", {
-                x: me.x,
-                y: me.y,
-                angle: me.angle
-            });
+            sendMyPosition();
+            return false;
         }
 
         function updateMovement() {
             if (!myId || !players[myId]) return;
 
-            if (mouseHeld) {
-                moveTowardsTarget(mouseX, mouseY);
+            if (holdMode && mouseDown) {
+                moveMyShipTowards(mouseX, mouseY, false);
                 return;
             }
 
-            if (clickMoveActive) {
-                const me = players[myId];
-                const dx = clickTargetX - me.x;
-                const dy = clickTargetY - me.y;
-                const distance = Math.hypot(dx, dy);
-
-                if (distance <= SHIP_SPEED) {
-                    me.x = clickTargetX;
-                    me.y = clickTargetY;
-                    clampPlayer(me);
-                    socket.emit("move", {
-                        x: me.x,
-                        y: me.y,
-                        angle: me.angle || 0
-                    });
-                    clickMoveActive = false;
-                    return;
+            if (targetMode) {
+                const reached = moveMyShipTowards(targetX, targetY, true);
+                if (reached) {
+                    targetMode = false;
                 }
-
-                moveTowardsTarget(clickTargetX, clickTargetY);
             }
         }
 
@@ -225,6 +231,10 @@
             const pos = getMousePos(event);
             mouseX = pos.x;
             mouseY = pos.y;
+
+            if (mouseDown) {
+                movedWhileHolding = true;
+            }
         });
 
         canvas.addEventListener("mousedown", (event) => {
@@ -234,8 +244,12 @@
             mouseX = pos.x;
             mouseY = pos.y;
 
-            mouseHeld = true;
-            clickMoveActive = false;
+            mouseDown = true;
+            mouseDownTime = Date.now();
+            movedWhileHolding = false;
+
+            holdMode = true;
+            targetMode = false;
         });
 
         canvas.addEventListener("mouseup", (event) => {
@@ -245,18 +259,23 @@
             mouseX = pos.x;
             mouseY = pos.y;
 
-            mouseHeld = false;
-        });
+            const holdDuration = Date.now() - mouseDownTime;
 
-        canvas.addEventListener("click", (event) => {
-            const pos = getMousePos(event);
-            clickTargetX = pos.x;
-            clickTargetY = pos.y;
-            clickMoveActive = true;
+            mouseDown = false;
+            holdMode = false;
+
+            if (holdDuration < 180 && !movedWhileHolding) {
+                targetX = pos.x;
+                targetY = pos.y;
+                targetMode = true;
+            } else {
+                targetMode = false;
+            }
         });
 
         canvas.addEventListener("mouseleave", () => {
-            mouseHeld = false;
+            mouseDown = false;
+            holdMode = false;
         });
 
         window.addEventListener("resize", resizeCanvas);
