@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Space Game</title>
     <style>
         html,
@@ -21,11 +21,12 @@
             position: fixed;
             top: 10px;
             left: 10px;
-            background: rgba(0, 0, 0, 0.55);
+            background: rgba(0, 0, 0, 0.58);
             padding: 10px 14px;
             border-radius: 10px;
             z-index: 10;
-            line-height: 1.4;
+            line-height: 1.5;
+            min-width: 320px;
         }
         
         canvas {
@@ -50,7 +51,19 @@
 
         const WORLD_WIDTH = 5000;
         const WORLD_HEIGHT = 5000;
+
         const MAX_SPEED = 5;
+
+        const LASER_RANGE = 700;
+        const LASER_DAMAGE = 10;
+        const LASER_COOLDOWN = 400;
+
+        const NPC_ATTACK_RANGE = 260;
+        const NPC_DAMAGE = 8;
+        const NPC_ATTACK_COOLDOWN = 900;
+
+        const PLAYER_MAX_HP = 200;
+        const PLAYER_RESPAWN_TIME = 3000;
 
         const players = {};
         let myId = null;
@@ -62,27 +75,49 @@
             radius: 22,
             hp: 100,
             maxHp: 100,
-            color: "#ff9933"
+            color: "#ff9933",
+            homeX: 900,
+            homeY: 900,
+            moveAngle: 0.8,
+            moveSpeed: 1.1,
+            roamRadius: 180,
+            lastAttackTime: 0
         }, {
             id: 2,
             x: 1400,
             y: 1100,
             radius: 22,
-            hp: 100,
-            maxHp: 100,
-            color: "#ff9933"
+            hp: 120,
+            maxHp: 120,
+            color: "#ff9933",
+            homeX: 1400,
+            homeY: 1100,
+            moveAngle: 2.1,
+            moveSpeed: 0.9,
+            roamRadius: 160,
+            lastAttackTime: 0
         }, {
             id: 3,
             x: 1800,
             y: 1500,
             radius: 22,
-            hp: 100,
-            maxHp: 100,
-            color: "#ff9933"
+            hp: 150,
+            maxHp: 150,
+            color: "#ff9933",
+            homeX: 1800,
+            homeY: 1500,
+            moveAngle: 4.2,
+            moveSpeed: 1.0,
+            roamRadius: 200,
+            lastAttackTime: 0
         }];
+
+        const lasers = [];
+        const npcLasers = [];
 
         let selectedNpcId = null;
         let attacking = false;
+        let lastShotTime = 0;
 
         let mouseX = 0;
         let mouseY = 0;
@@ -96,6 +131,21 @@
         function resizeCanvas() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
+        }
+
+        function ensureMyPlayerDefaults() {
+            if (!myId || !players[myId]) return;
+
+            const me = players[myId];
+
+            if (typeof me.speed !== "number") me.speed = 0;
+            if (typeof me.vx !== "number") me.vx = 0;
+            if (typeof me.vy !== "number") me.vy = 0;
+            if (typeof me.angle !== "number") me.angle = 0;
+            if (typeof me.hp !== "number") me.hp = PLAYER_MAX_HP;
+            if (typeof me.maxHp !== "number") me.maxHp = PLAYER_MAX_HP;
+            if (typeof me.isDead !== "boolean") me.isDead = false;
+            if (typeof me.respawnAt !== "number") me.respawnAt = 0;
         }
 
         function getCameraOffset() {
@@ -137,6 +187,21 @@
             return null;
         }
 
+        function getSelectedNpc() {
+            if (selectedNpcId === null) return null;
+            return npcs.find(npc => npc.id === selectedNpcId) || null;
+        }
+
+        function getMyPlayer() {
+            if (!myId || !players[myId]) return null;
+            ensureMyPlayerDefaults();
+            return players[myId];
+        }
+
+        function distanceBetween(aX, aY, bX, bY) {
+            return Math.hypot(bX - aX, bY - aY);
+        }
+
         function drawStars(camera) {
             for (let i = 0; i < 500; i++) {
                 const x = ((i * 97) % WORLD_WIDTH) - camera.x;
@@ -171,6 +236,21 @@
             ctx.restore();
         }
 
+        function drawPlayerHpBar(player, camera, isMe) {
+            const screenX = player.x - camera.x;
+            const screenY = player.y - camera.y;
+
+            const barWidth = 50;
+            const barHeight = 6;
+            const hpRatio = Math.max(0, player.hp) / player.maxHp;
+
+            ctx.fillStyle = "#222";
+            ctx.fillRect(screenX - barWidth / 2, screenY - 34, barWidth, barHeight);
+
+            ctx.fillStyle = isMe ? "#4ade80" : "#60a5fa";
+            ctx.fillRect(screenX - barWidth / 2, screenY - 34, barWidth * hpRatio, barHeight);
+        }
+
         function drawNpc(npc, camera) {
             const screenX = npc.x - camera.x;
             const screenY = npc.y - camera.y;
@@ -184,28 +264,47 @@
                 ctx.strokeStyle = "#00ff88";
                 ctx.lineWidth = 3;
                 ctx.stroke();
+            }
 
-                const barWidth = 50;
-                const barHeight = 6;
-                const hpRatio = npc.hp / npc.maxHp;
+            const barWidth = 50;
+            const barHeight = 6;
+            const hpRatio = npc.hp / npc.maxHp;
 
-                ctx.fillStyle = "#222";
-                ctx.fillRect(screenX - barWidth / 2, screenY - 36, barWidth, barHeight);
+            ctx.fillStyle = "#222";
+            ctx.fillRect(screenX - barWidth / 2, screenY - 36, barWidth, barHeight);
 
-                ctx.fillStyle = "#ff4444";
-                ctx.fillRect(screenX - barWidth / 2, screenY - 36, barWidth * hpRatio, barHeight);
+            ctx.fillStyle = "#ff4444";
+            ctx.fillRect(screenX - barWidth / 2, screenY - 36, barWidth * hpRatio, barHeight);
+        }
+
+        function drawLasers(camera) {
+            for (const laser of lasers) {
+                ctx.strokeStyle = "#ff2d55";
+                ctx.lineWidth = 2;
+
+                ctx.beginPath();
+                ctx.moveTo(laser.fromX - camera.x, laser.fromY - camera.y);
+                ctx.lineTo(laser.toX - camera.x, laser.toY - camera.y);
+                ctx.stroke();
+            }
+        }
+
+        function drawNpcLasers(camera) {
+            for (const laser of npcLasers) {
+                ctx.strokeStyle = "#ffd60a";
+                ctx.lineWidth = 2;
+
+                ctx.beginPath();
+                ctx.moveTo(laser.fromX - camera.x, laser.fromY - camera.y);
+                ctx.lineTo(laser.toX - camera.x, laser.toY - camera.y);
+                ctx.stroke();
             }
         }
 
         function updateMovement() {
-            if (!myId || !players[myId]) return;
-
-            const me = players[myId];
-
-            if (typeof me.speed !== "number") me.speed = 0;
-            if (typeof me.vx !== "number") me.vx = 0;
-            if (typeof me.vy !== "number") me.vy = 0;
-            if (typeof me.angle !== "number") me.angle = 0;
+            const me = getMyPlayer();
+            if (!me) return;
+            if (me.isDead) return;
 
             let targetXLocal = me.x;
             let targetYLocal = me.y;
@@ -249,7 +348,7 @@
             me.y = Math.max(10, Math.min(WORLD_HEIGHT - 10, me.y));
 
             if (attacking && selectedNpcId !== null) {
-                const npc = npcs.find(n => n.id === selectedNpcId);
+                const npc = getSelectedNpc();
 
                 if (npc) {
                     const aimDx = npc.x - me.x;
@@ -269,23 +368,194 @@
             });
         }
 
+        function updateNpcMovement() {
+            for (const npc of npcs) {
+                npc.moveAngle += (Math.random() - 0.5) * 0.08;
+
+                let nextX = npc.x + Math.cos(npc.moveAngle) * npc.moveSpeed;
+                let nextY = npc.y + Math.sin(npc.moveAngle) * npc.moveSpeed;
+
+                const distFromHome = distanceBetween(nextX, nextY, npc.homeX, npc.homeY);
+
+                if (distFromHome > npc.roamRadius) {
+                    const angleHome = Math.atan2(npc.homeY - npc.y, npc.homeX - npc.x);
+                    npc.moveAngle = angleHome;
+                    nextX = npc.x + Math.cos(npc.moveAngle) * npc.moveSpeed;
+                    nextY = npc.y + Math.sin(npc.moveAngle) * npc.moveSpeed;
+                }
+
+                npc.x = Math.max(npc.radius, Math.min(WORLD_WIDTH - npc.radius, nextX));
+                npc.y = Math.max(npc.radius, Math.min(WORLD_HEIGHT - npc.radius, nextY));
+            }
+        }
+
+        function updateCombat() {
+            const me = getMyPlayer();
+            if (!me) return;
+            if (me.isDead) return;
+            if (!attacking) return;
+            if (selectedNpcId === null) return;
+
+            const npc = getSelectedNpc();
+
+            if (!npc) {
+                attacking = false;
+                selectedNpcId = null;
+                return;
+            }
+
+            const distance = distanceBetween(me.x, me.y, npc.x, npc.y);
+
+            if (distance > LASER_RANGE) {
+                return;
+            }
+
+            const now = Date.now();
+
+            if (now - lastShotTime < LASER_COOLDOWN) {
+                return;
+            }
+
+            lastShotTime = now;
+
+            lasers.push({
+                fromX: me.x,
+                fromY: me.y,
+                toX: npc.x,
+                toY: npc.y,
+                expiresAt: now + 120
+            });
+
+            npc.hp -= LASER_DAMAGE;
+
+            if (npc.hp <= 0) {
+                const index = npcs.findIndex(n => n.id === npc.id);
+
+                if (index !== -1) {
+                    npcs.splice(index, 1);
+                }
+
+                selectedNpcId = null;
+                attacking = false;
+            }
+        }
+
+        function updateNpcCombat() {
+            const me = getMyPlayer();
+            if (!me) return;
+            if (me.isDead) return;
+
+            const now = Date.now();
+
+            for (const npc of npcs) {
+                const distance = distanceBetween(npc.x, npc.y, me.x, me.y);
+
+                if (distance > NPC_ATTACK_RANGE) {
+                    continue;
+                }
+
+                if (now - npc.lastAttackTime < NPC_ATTACK_COOLDOWN) {
+                    continue;
+                }
+
+                npc.lastAttackTime = now;
+
+                npcLasers.push({
+                    fromX: npc.x,
+                    fromY: npc.y,
+                    toX: me.x,
+                    toY: me.y,
+                    expiresAt: now + 120
+                });
+
+                me.hp -= NPC_DAMAGE;
+
+                if (me.hp <= 0) {
+                    killPlayer();
+                    break;
+                }
+            }
+        }
+
+        function killPlayer() {
+            const me = getMyPlayer();
+            if (!me) return;
+
+            me.hp = 0;
+            me.isDead = true;
+            me.respawnAt = Date.now() + PLAYER_RESPAWN_TIME;
+            me.speed = 0;
+            me.vx = 0;
+            me.vy = 0;
+
+            attacking = false;
+            selectedNpcId = null;
+            mouseDown = false;
+            targetMode = false;
+        }
+
+        function updateRespawn() {
+            const me = getMyPlayer();
+            if (!me) return;
+            if (!me.isDead) return;
+
+            if (Date.now() < me.respawnAt) {
+                return;
+            }
+
+            me.isDead = false;
+            me.hp = me.maxHp;
+            me.x = WORLD_WIDTH / 2;
+            me.y = WORLD_HEIGHT / 2;
+            me.angle = 0;
+            me.speed = 0;
+            me.vx = 0;
+            me.vy = 0;
+        }
+
+        function updateLasers() {
+            const now = Date.now();
+
+            for (let i = lasers.length - 1; i >= 0; i--) {
+                if (lasers[i].expiresAt <= now) {
+                    lasers.splice(i, 1);
+                }
+            }
+
+            for (let i = npcLasers.length - 1; i >= 0; i--) {
+                if (npcLasers[i].expiresAt <= now) {
+                    npcLasers.splice(i, 1);
+                }
+            }
+        }
+
         function updateHud() {
-            if (!myId || !players[myId]) {
+            const me = getMyPlayer();
+
+            if (!me) {
                 hud.textContent = "Verbinde...";
                 return;
             }
 
-            let text = "Verbunden";
+            let text = "";
+            text += "Verbunden";
+            text += " | HP: " + me.hp + "/" + me.maxHp;
 
-            if (selectedNpcId !== null) {
-                text += " | Ziel: NPC " + selectedNpcId;
+            const npc = getSelectedNpc();
+            if (npc) {
+                text += " | Ziel: NPC " + npc.id + " (" + npc.hp + "/" + npc.maxHp + " HP)";
             }
 
             if (attacking) {
                 text += " | Angriff aktiv";
             }
 
-            text += " | ESC = Ziel löschen | STRG = Angriff an/aus";
+            if (me.isDead) {
+                const seconds = Math.max(0, Math.ceil((me.respawnAt - Date.now()) / 1000));
+                text += " | Zerstört - Respawn in " + seconds + "s";
+            }
+
+            text += " | STRG = Angriff an/aus | ESC = Ziel löschen";
 
             hud.textContent = text;
         }
@@ -308,16 +578,24 @@
                 drawNpc(npc, camera);
             }
 
+            drawLasers(camera);
+            drawNpcLasers(camera);
+
             for (const id in players) {
                 const p = players[id];
+                const isMe = id === myId;
 
                 drawShip(
                     p.x - camera.x,
                     p.y - camera.y,
                     p.angle || 0,
                     p.color || "#4da6ff",
-                    id === myId
+                    isMe
                 );
+
+                if (typeof p.hp === "number" && typeof p.maxHp === "number") {
+                    drawPlayerHpBar(p, camera, isMe);
+                }
             }
 
             updateHud();
@@ -333,6 +611,12 @@
             for (const id in serverPlayers) {
                 players[id] = serverPlayers[id];
             }
+
+            if (myId && players[myId]) {
+                ensureMyPlayerDefaults();
+                if (typeof players[myId].x !== "number") players[myId].x = WORLD_WIDTH / 2;
+                if (typeof players[myId].y !== "number") players[myId].y = WORLD_HEIGHT / 2;
+            }
         });
 
         socket.on("newPlayer", (player) => {
@@ -347,7 +631,11 @@
                     x: player.x,
                     y: player.y,
                     angle: player.angle || 0,
-                    color: "#4da6ff"
+                    color: "#4da6ff",
+                    hp: PLAYER_MAX_HP,
+                    maxHp: PLAYER_MAX_HP,
+                    isDead: false,
+                    respawnAt: 0
                 };
             } else {
                 players[player.id].x = player.x;
@@ -371,6 +659,8 @@
         });
 
         canvas.addEventListener("mousedown", (event) => {
+            const me = getMyPlayer();
+            if (!me || me.isDead) return;
             if (event.button !== 0) return;
 
             const pos = getMousePos(event);
@@ -393,6 +683,9 @@
         });
 
         canvas.addEventListener("dblclick", (event) => {
+            const me = getMyPlayer();
+            if (!me || me.isDead) return;
+
             const pos = getMousePos(event);
             const clickedNpc = getNpcAtPosition(pos.x, pos.y);
 
@@ -403,6 +696,8 @@
         });
 
         canvas.addEventListener("mouseup", (event) => {
+            const me = getMyPlayer();
+            if (!me || me.isDead) return;
             if (event.button !== 0) return;
 
             const pos = getMousePos(event);
@@ -425,6 +720,9 @@
         });
 
         window.addEventListener("keydown", (event) => {
+            const me = getMyPlayer();
+            if (!me || me.isDead) return;
+
             if (event.key === "Control") {
                 if (selectedNpcId !== null) {
                     attacking = !attacking;
@@ -440,7 +738,14 @@
         window.addEventListener("resize", resizeCanvas);
 
         resizeCanvas();
+
         setInterval(updateMovement, 1000 / 60);
+        setInterval(updateNpcMovement, 1000 / 60);
+        setInterval(updateCombat, 1000 / 60);
+        setInterval(updateNpcCombat, 1000 / 60);
+        setInterval(updateLasers, 1000 / 60);
+        setInterval(updateRespawn, 200);
+
         gameLoop();
     </script>
 </body>
