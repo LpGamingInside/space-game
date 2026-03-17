@@ -26,7 +26,7 @@
             border-radius: 10px;
             z-index: 10;
             line-height: 1.5;
-            min-width: 320px;
+            min-width: 380px;
         }
         
         canvas {
@@ -59,6 +59,8 @@
         const LASER_COOLDOWN = 400;
 
         const NPC_ATTACK_RANGE = 260;
+        const NPC_CHASE_RANGE = 500;
+        const NPC_LOSE_RANGE = 700;
         const NPC_DAMAGE = 8;
         const NPC_ATTACK_COOLDOWN = 900;
 
@@ -80,8 +82,12 @@
             homeY: 900,
             moveAngle: 0.8,
             moveSpeed: 1.1,
+            chaseSpeed: 1.8,
             roamRadius: 180,
-            lastAttackTime: 0
+            lastAttackTime: 0,
+            state: "roam",
+            rewardCredits: 120,
+            rewardCrystals: 4
         }, {
             id: 2,
             x: 1400,
@@ -94,8 +100,12 @@
             homeY: 1100,
             moveAngle: 2.1,
             moveSpeed: 0.9,
+            chaseSpeed: 1.7,
             roamRadius: 160,
-            lastAttackTime: 0
+            lastAttackTime: 0,
+            state: "roam",
+            rewardCredits: 150,
+            rewardCrystals: 5
         }, {
             id: 3,
             x: 1800,
@@ -108,12 +118,17 @@
             homeY: 1500,
             moveAngle: 4.2,
             moveSpeed: 1.0,
+            chaseSpeed: 2.0,
             roamRadius: 200,
-            lastAttackTime: 0
+            lastAttackTime: 0,
+            state: "roam",
+            rewardCredits: 220,
+            rewardCrystals: 8
         }];
 
         const lasers = [];
         const npcLasers = [];
+        const explosions = [];
 
         let selectedNpcId = null;
         let attacking = false;
@@ -127,6 +142,9 @@
         let targetY = 0;
         let mouseDownTime = 0;
         let movedWhileHolding = false;
+
+        let credits = 0;
+        let crystals = 0;
 
         function resizeCanvas() {
             canvas.width = window.innerWidth;
@@ -202,6 +220,17 @@
             return Math.hypot(bX - aX, bY - aY);
         }
 
+        function createExplosion(x, y, color = "#ff9933", maxRadius = 36) {
+            explosions.push({
+                x,
+                y,
+                color,
+                radius: 4,
+                maxRadius,
+                alpha: 1
+            });
+        }
+
         function drawStars(camera) {
             for (let i = 0; i < 500; i++) {
                 const x = ((i * 97) % WORLD_WIDTH) - camera.x;
@@ -212,7 +241,9 @@
             }
         }
 
-        function drawShip(x, y, angle, color, isMe) {
+        function drawShip(x, y, angle, color, isMe, isDead) {
+            if (isDead) return;
+
             ctx.save();
             ctx.translate(x, y);
             ctx.rotate(angle);
@@ -237,6 +268,8 @@
         }
 
         function drawPlayerHpBar(player, camera, isMe) {
+            if (player.isDead) return;
+
             const screenX = player.x - camera.x;
             const screenY = player.y - camera.y;
 
@@ -298,6 +331,24 @@
                 ctx.moveTo(laser.fromX - camera.x, laser.fromY - camera.y);
                 ctx.lineTo(laser.toX - camera.x, laser.toY - camera.y);
                 ctx.stroke();
+            }
+        }
+
+        function drawExplosions(camera) {
+            for (const explosion of explosions) {
+                ctx.save();
+                ctx.globalAlpha = explosion.alpha;
+                ctx.beginPath();
+                ctx.arc(
+                    explosion.x - camera.x,
+                    explosion.y - camera.y,
+                    explosion.radius,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fillStyle = explosion.color;
+                ctx.fill();
+                ctx.restore();
             }
         }
 
@@ -369,23 +420,69 @@
         }
 
         function updateNpcMovement() {
+            const me = getMyPlayer();
+
             for (const npc of npcs) {
-                npc.moveAngle += (Math.random() - 0.5) * 0.08;
+                let targetX = npc.homeX;
+                let targetY = npc.homeY;
+                let speed = npc.moveSpeed;
 
-                let nextX = npc.x + Math.cos(npc.moveAngle) * npc.moveSpeed;
-                let nextY = npc.y + Math.sin(npc.moveAngle) * npc.moveSpeed;
+                if (me && !me.isDead) {
+                    const distToPlayer = distanceBetween(npc.x, npc.y, me.x, me.y);
 
-                const distFromHome = distanceBetween(nextX, nextY, npc.homeX, npc.homeY);
+                    if (distToPlayer <= NPC_CHASE_RANGE) {
+                        npc.state = "chase";
+                    } else if (distToPlayer >= NPC_LOSE_RANGE) {
+                        npc.state = "return";
+                    }
 
-                if (distFromHome > npc.roamRadius) {
-                    const angleHome = Math.atan2(npc.homeY - npc.y, npc.homeX - npc.x);
-                    npc.moveAngle = angleHome;
-                    nextX = npc.x + Math.cos(npc.moveAngle) * npc.moveSpeed;
-                    nextY = npc.y + Math.sin(npc.moveAngle) * npc.moveSpeed;
+                    if (npc.state === "chase") {
+                        targetX = me.x;
+                        targetY = me.y;
+                        speed = npc.chaseSpeed;
+                    } else if (npc.state === "return") {
+                        targetX = npc.homeX;
+                        targetY = npc.homeY;
+                        speed = npc.moveSpeed;
+
+                        const homeDist = distanceBetween(npc.x, npc.y, npc.homeX, npc.homeY);
+                        if (homeDist < 10) {
+                            npc.state = "roam";
+                        }
+                    }
                 }
 
-                npc.x = Math.max(npc.radius, Math.min(WORLD_WIDTH - npc.radius, nextX));
-                npc.y = Math.max(npc.radius, Math.min(WORLD_HEIGHT - npc.radius, nextY));
+                if (npc.state === "roam") {
+                    npc.moveAngle += (Math.random() - 0.5) * 0.08;
+
+                    let nextX = npc.x + Math.cos(npc.moveAngle) * npc.moveSpeed;
+                    let nextY = npc.y + Math.sin(npc.moveAngle) * npc.moveSpeed;
+
+                    const distFromHome = distanceBetween(nextX, nextY, npc.homeX, npc.homeY);
+
+                    if (distFromHome > npc.roamRadius) {
+                        const angleHome = Math.atan2(npc.homeY - npc.y, npc.homeX - npc.x);
+                        npc.moveAngle = angleHome;
+                        nextX = npc.x + Math.cos(npc.moveAngle) * npc.moveSpeed;
+                        nextY = npc.y + Math.sin(npc.moveAngle) * npc.moveSpeed;
+                    }
+
+                    npc.x = Math.max(npc.radius, Math.min(WORLD_WIDTH - npc.radius, nextX));
+                    npc.y = Math.max(npc.radius, Math.min(WORLD_HEIGHT - npc.radius, nextY));
+                    continue;
+                }
+
+                const dx = targetX - npc.x;
+                const dy = targetY - npc.y;
+                const distance = Math.hypot(dx, dy);
+
+                if (distance > 1) {
+                    npc.x += (dx / distance) * speed;
+                    npc.y += (dy / distance) * speed;
+                }
+
+                npc.x = Math.max(npc.radius, Math.min(WORLD_WIDTH - npc.radius, npc.x));
+                npc.y = Math.max(npc.radius, Math.min(WORLD_HEIGHT - npc.radius, npc.y));
             }
         }
 
@@ -429,6 +526,11 @@
             npc.hp -= LASER_DAMAGE;
 
             if (npc.hp <= 0) {
+                credits += npc.rewardCredits;
+                crystals += npc.rewardCrystals;
+
+                createExplosion(npc.x, npc.y, "#ff9933", 42);
+
                 const index = npcs.findIndex(n => n.id === npc.id);
 
                 if (index !== -1) {
@@ -481,6 +583,8 @@
             const me = getMyPlayer();
             if (!me) return;
 
+            createExplosion(me.x, me.y, "#60a5fa", 50);
+
             me.hp = 0;
             me.isDead = true;
             me.respawnAt = Date.now() + PLAYER_RESPAWN_TIME;
@@ -529,6 +633,18 @@
             }
         }
 
+        function updateExplosions() {
+            for (let i = explosions.length - 1; i >= 0; i--) {
+                const explosion = explosions[i];
+                explosion.radius += 1.8;
+                explosion.alpha -= 0.05;
+
+                if (explosion.radius >= explosion.maxRadius || explosion.alpha <= 0) {
+                    explosions.splice(i, 1);
+                }
+            }
+        }
+
         function updateHud() {
             const me = getMyPlayer();
 
@@ -540,6 +656,8 @@
             let text = "";
             text += "Verbunden";
             text += " | HP: " + me.hp + "/" + me.maxHp;
+            text += " | Credits: " + credits;
+            text += " | Kristalle: " + crystals;
 
             const npc = getSelectedNpc();
             if (npc) {
@@ -580,6 +698,7 @@
 
             drawLasers(camera);
             drawNpcLasers(camera);
+            drawExplosions(camera);
 
             for (const id in players) {
                 const p = players[id];
@@ -590,7 +709,7 @@
                     p.y - camera.y,
                     p.angle || 0,
                     p.color || "#4da6ff",
-                    isMe
+                    isMe, !!p.isDead
                 );
 
                 if (typeof p.hp === "number" && typeof p.maxHp === "number") {
@@ -744,6 +863,7 @@
         setInterval(updateCombat, 1000 / 60);
         setInterval(updateNpcCombat, 1000 / 60);
         setInterval(updateLasers, 1000 / 60);
+        setInterval(updateExplosions, 1000 / 60);
         setInterval(updateRespawn, 200);
 
         gameLoop();
