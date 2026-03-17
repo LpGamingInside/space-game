@@ -46,6 +46,8 @@
         const canvas = document.getElementById("game");
         const ctx = canvas.getContext("2d");
         const hud = document.getElementById("hud");
+        const WORLD_WIDTH = 5000;
+        const WORLD_HEIGHT = 5000;
 
         const players = {};
         let myId = null;
@@ -66,16 +68,18 @@
 
         function getMousePos(event) {
             const rect = canvas.getBoundingClientRect();
+            const camera = getCameraOffset();
+
             return {
-                x: event.clientX - rect.left,
-                y: event.clientY - rect.top
+                x: (event.clientX - rect.left) + camera.x,
+                y: (event.clientY - rect.top) + camera.y
             };
         }
 
         function drawStars(camera) {
-            for (let i = 0; i < 200; i++) {
-                const x = ((i * 97) % 2000) - (camera.x % 2000);
-                const y = ((i * 53) % 2000) - (camera.y % 2000);
+            for (let i = 0; i < 500; i++) {
+                const x = ((i * 97) % WORLD_WIDTH) - camera.x;
+                const y = ((i * 53) % WORLD_HEIGHT) - camera.y;
 
                 ctx.fillStyle = "white";
                 ctx.fillRect(x, y, 2, 2);
@@ -173,8 +177,8 @@
             me.x += me.vx;
             me.y += me.vy;
 
-            me.x = Math.max(10, Math.min(canvas.width - 10, me.x));
-            me.y = Math.max(10, Math.min(canvas.height - 10, me.y));
+            me.x = Math.max(10, Math.min(WORLD_WIDTH - 10, me.x));
+            me.y = Math.max(10, Math.min(WORLD_HEIGHT - 10, me.y));
 
             socket.emit("move", {
                 x: me.x,
@@ -189,6 +193,13 @@
             const camera = getCameraOffset();
 
             drawStars(camera);
+
+            ctx.strokeStyle = "#1e293b";
+            ctx.lineWidth = 4;
+            ctx.strokeRect(-camera.x, -camera.y,
+                WORLD_WIDTH,
+                WORLD_HEIGHT
+            );
 
             for (const id in players) {
                 const p = players[id];
