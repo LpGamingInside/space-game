@@ -14,6 +14,32 @@ const tabDefs = [
     { id: "drones", label: "Drohnen" }
 ];
 
+function getShipSvg(color) {
+    return `
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+            <defs>
+                <linearGradient id="shopShipGrad" x1="0" x2="1">
+                    <stop offset="0%" stop-color="${color}"></stop>
+                    <stop offset="100%" stop-color="#ffffff"></stop>
+                </linearGradient>
+            </defs>
+            <polygon points="50,10 72,78 50,60 28,78" fill="url(#shopShipGrad)"></polygon>
+            <polygon points="50,26 60,58 50,52 40,58" fill="#ffffff33"></polygon>
+            <rect x="45" y="60" width="10" height="14" rx="3" fill="#0f172a"></rect>
+        </svg>
+    `;
+}
+
+function getItemIcon(category) {
+    const icons = {
+        lasers: "⚡",
+        generators: "🛡️",
+        extras: "✦",
+        drones: "◈"
+    };
+    return icons[category] || "•";
+}
+
 function renderResources() {
     const xpNeeded = getXpNeededForLevel(save.level);
 
@@ -88,6 +114,7 @@ function renderGrid() {
             const owned = save.ownedShips.includes(item.id);
 
             box.innerHTML = `
+                <div class="ship-preview">${getShipSvg(item.color)}</div>
                 <div class="ship-name">${item.name}</div>
                 <div class="item-stats">
                     HP: ${item.hp}<br>
@@ -95,10 +122,9 @@ function renderGrid() {
                     Speed: ${item.speed}<br>
                     Laser-Slots: ${item.laserSlots}<br>
                     Generator-Slots: ${item.generatorSlots}<br>
-                    Extra-Slots: ${item.extraSlots}<br>
-                    Drohnen-Slots: ${item.droneSlots}<br>
-                    Preis: ${item.priceCredits} Credits / ${item.priceCrystals} Kristalle
+                    Extra-Slots: ${item.extraSlots}
                 </div>
+                <div class="shop-price">${item.priceCredits} Credits / ${item.priceCrystals} Kristalle</div>
                 <button class="btn ${owned ? "secondary" : ""}" ${owned ? "disabled" : ""}>
                     ${owned ? "Bereits gekauft" : "Kaufen"}
                 </button>
@@ -112,14 +138,15 @@ function renderGrid() {
             const ownedCount = countItems(save.inventory[activeTab])[item.id] || 0;
 
             box.innerHTML = `
-                <div class="shop-item-name">${item.name}</div>
+                <div class="shop-item-name"><span class="icon-badge">${getItemIcon(activeTab)}</span>${item.name}</div>
                 <div class="item-stats">
                     ${item.damageBonus ? `Schaden +${item.damageBonus}<br>` : ""}
                     ${item.hpBonus ? `HP +${item.hpBonus}<br>` : ""}
                     ${item.rangeBonus ? `Reichweite +${item.rangeBonus}<br>` : ""}
-                    Im Inventar: ${ownedCount}<br>
-                    Preis: ${item.priceCredits} Credits / ${item.priceCrystals} Kristalle
+                    ${item.slotBonus ? `Drohnen-Slots +${item.slotBonus}<br>` : ""}
+                    Im Inventar: ${ownedCount}
                 </div>
+                <div class="shop-price">${item.priceCredits} Credits / ${item.priceCrystals} Kristalle</div>
                 <button class="btn">Kaufen</button>
             `;
 

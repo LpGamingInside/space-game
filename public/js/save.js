@@ -1,4 +1,4 @@
-const SAVE_KEY = "spaceGameSaveV2";
+const SAVE_KEY = "spaceGameSaveV3";
 
 function deepClone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -26,6 +26,7 @@ function normalizeSave(save) {
     if (!save.loadouts) save.loadouts = {};
     if (!save.ownedShips) save.ownedShips = ["phoenix"];
     if (!save.activeShipId) save.activeShipId = "phoenix";
+    if (!save.currentMapId) save.currentMapId = "1-1";
     if (typeof save.credits !== "number") save.credits = 1000;
     if (typeof save.crystals !== "number") save.crystals = 100;
     if (typeof save.xp !== "number") save.xp = 0;
@@ -80,7 +81,9 @@ function ensureShipLoadout(save, shipId) {
             lasers: [],
             generators: [],
             extras: [],
-            drones: []
+            drones: [],
+            droneLasers: [],
+            droneGenerators: []
         };
     }
 
@@ -88,6 +91,8 @@ function ensureShipLoadout(save, shipId) {
     if (!save.loadouts[shipId].generators) save.loadouts[shipId].generators = [];
     if (!save.loadouts[shipId].extras) save.loadouts[shipId].extras = [];
     if (!save.loadouts[shipId].drones) save.loadouts[shipId].drones = [];
+    if (!save.loadouts[shipId].droneLasers) save.loadouts[shipId].droneLasers = [];
+    if (!save.loadouts[shipId].droneGenerators) save.loadouts[shipId].droneGenerators = [];
 }
 
 function getXpNeededForLevel(level) {

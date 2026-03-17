@@ -10,12 +10,12 @@ function getShipSvg(color) {
     return `
         <svg viewBox="0 0 100 100" aria-hidden="true">
             <defs>
-                <linearGradient id="shipGrad" x1="0" x2="1">
+                <linearGradient id="shipGradHangar" x1="0" x2="1">
                     <stop offset="0%" stop-color="${color}"></stop>
                     <stop offset="100%" stop-color="#ffffff"></stop>
                 </linearGradient>
             </defs>
-            <polygon points="50,10 72,78 50,60 28,78" fill="url(#shipGrad)"></polygon>
+            <polygon points="50,10 72,78 50,60 28,78" fill="url(#shipGradHangar)"></polygon>
             <polygon points="50,26 60,58 50,52 40,58" fill="#ffffff33"></polygon>
             <rect x="45" y="60" width="10" height="14" rx="3" fill="#0f172a"></rect>
         </svg>
@@ -27,7 +27,9 @@ function getItemIcon(category) {
         lasers: "⚡",
         generators: "🛡️",
         extras: "✦",
-        drones: "◈"
+        drones: "◈",
+        droneLasers: "⚡",
+        droneGenerators: "🛡️"
     };
     return icons[category] || "•";
 }
@@ -41,6 +43,21 @@ function renderResources() {
         <div>Level: ${save.level}</div>
         <div>XP: ${save.xp}/${xpNeeded}</div>
     `;
+}
+
+function getDroneSlotCapacity(loadout) {
+    let capacity = 0;
+    for (const droneId of loadout.drones) {
+        const drone = getEquipmentById("drones", droneId);
+        if (drone) {
+            capacity += drone.slotBonus || 0;
+        }
+    }
+    return capacity;
+}
+
+function getUsedDroneSlotCapacity(loadout) {
+    return loadout.droneLasers.length + loadout.droneGenerators.length;
 }
 
 function calculateShipCombatStats(shipId) {
@@ -71,15 +88,24 @@ function calculateShipCombatStats(shipId) {
         }
     }
 
-    for (const droneId of loadout.drones) {
-        const item = getEquipmentById("drones", droneId);
-        if (item) {
-            hp += item.hpBonus || 0;
-            damage += item.damageBonus || 0;
-        }
+    for (const laserId of loadout.droneLasers) {
+        const item = getEquipmentById("lasers", laserId);
+        if (item) damage += item.damageBonus || 0;
     }
 
-    return { hp, damage, speed, range };
+    for (const genId of loadout.droneGenerators) {
+        const item = getEquipmentById("generators", genId);
+        if (item) hp += item.hpBonus || 0;
+    }
+
+    return {
+        hp,
+        damage,
+        speed,
+        range,
+        droneSlots: getDroneSlotCapacity(loadout),
+        droneSlotsUsed: getUsedDroneSlotCapacity(loadout)
+    };
 }
 
 function renderShipList() {
@@ -103,8 +129,7 @@ function renderShipList() {
                 Speed: ${ship.speed}<br>
                 Laser-Slots: ${ship.laserSlots}<br>
                 Generator-Slots: ${ship.generatorSlots}<br>
-                Extra-Slots: ${ship.extraSlots}<br>
-                Drohnen-Slots: ${ship.droneSlots}
+                Extra-Slots: ${ship.extraSlots}
             </div>
             <button class="btn ${isActive ? "secondary" : ""}" data-ship-id="${ship.id}">
                 ${isActive ? "Aktiv" : "Als aktiv setzen"}
@@ -143,29 +168,42 @@ function renderActiveShip() {
                 Kampf-HP: ${stats.hp}<br>
                 Kampf-Schaden: ${stats.damage}<br>
                 Reichweite: ${stats.range}<br>
-                Speed: ${stats.speed}
+                Speed: ${stats.speed}<br>
+                Drohnen-Slots: ${stats.droneSlotsUsed}/${stats.droneSlots}
             </div>
         </div>
     `;
 }
 
-function getCategoryMeta(category, ship) {
+function getCategoryMeta(category, ship, loadout) {
+    const droneCapacity = getDroneSlotCapacity(loadout);
+    const usedDroneCapacity = getUsedDroneSlotCapacity(loadout);
+
     return {
-        lasers: { label: "Laser", max: ship.laserSlots },
-        generators: { label: "Generatoren", max: ship.generatorSlots },
-        extras: { label: "Extras", max: ship.extraSlots },
-        drones: { label: "Drohnen", max: ship.droneSlots }
+        lasers: { label: "Schiffs-Laser", max: ship.laserSlots, sourceCategory: "lasers" },
+        generators: { label: "Schiffs-Generatoren", max: ship.generatorSlots, sourceCategory: "generators" },
+        extras: { label: "Extras", max: ship.extraSlots, sourceCategory: "extras" },
+        drones: { label: "Drohnen", max: 8, sourceCategory: "drones" },
+        droneLasers: { label: "Drohnen-Laser", max: droneCapacity, used: usedDroneCapacity, sourceCategory: "lasers" },
+        droneGenerators: { label: "Drohnen-Schilde", max: droneCapacity, used: usedDroneCapacity, sourceCategory: "generators" }
     }[category];
+}
+
+function canEquipMore(category, meta, loadout) {
+    if (category === "droneLasers" || category === "droneGenerators") {
+        return getUsedDroneSlotCapacity(loadout) < meta.max;
+    }
+    return loadout[category].length < meta.max;
 }
 
 function equipItem(category, itemId) {
     const ship = getActiveShip(save);
     ensureShipLoadout(save, ship.id);
     const loadout = save.loadouts[ship.id];
-    const meta = getCategoryMeta(category, ship);
+    const meta = getCategoryMeta(category, ship, loadout);
 
-    if (loadout[category].length >= meta.max) return;
-    if (!removeOneItem(save.inventory[category], itemId)) return;
+    if (!canEquipMore(category, meta, loadout)) return;
+    if (!removeOneItem(save.inventory[meta.sourceCategory], itemId)) return;
 
     loadout[category].push(itemId);
     saveGame(save);
@@ -176,16 +214,20 @@ function unequipItem(category, itemId) {
     const ship = getActiveShip(save);
     ensureShipLoadout(save, ship.id);
     const loadout = save.loadouts[ship.id];
+    const meta = getCategoryMeta(category, ship, loadout);
 
     if (!removeOneItem(loadout[category], itemId)) return;
 
-    save.inventory[category].push(itemId);
+    save.inventory[meta.sourceCategory].push(itemId);
     saveGame(save);
     renderAll();
 }
 
 function makeItemRow(category, itemId, buttonText, onClick) {
-    const item = getEquipmentById(category, itemId);
+    const sourceCategory = category === "droneLasers" ? "lasers" :
+                           category === "droneGenerators" ? "generators" :
+                           category;
+    const item = getEquipmentById(sourceCategory, itemId);
 
     const row = document.createElement("div");
     row.className = "slot-item-row";
@@ -206,16 +248,20 @@ function renderLoadoutCategory(category) {
     ensureShipLoadout(save, ship.id);
 
     const loadout = save.loadouts[ship.id];
-    const meta = getCategoryMeta(category, ship);
+    const meta = getCategoryMeta(category, ship, loadout);
     const equipped = loadout[category];
-    const inventoryCounts = countItems(save.inventory[category]);
+    const inventoryCounts = countItems(save.inventory[meta.sourceCategory]);
 
     const div = document.createElement("div");
     div.className = "slot-box";
 
+    const capacityText = category === "droneLasers" || category === "droneGenerators"
+        ? `${getUsedDroneSlotCapacity(loadout)} / ${meta.max}`
+        : `${equipped.length} / ${meta.max}`;
+
     div.innerHTML = `
         <h3>${meta.label}</h3>
-        <div class="slot-line">Slots: ${equipped.length} / ${meta.max}</div>
+        <div class="slot-line">Slots: ${capacityText}</div>
         <div class="slot-line">Ausgerüstet:</div>
         <div id="equipped-${category}"></div>
         <div class="slot-line" style="margin-top:10px;">Inventar:</div>
@@ -242,11 +288,21 @@ function renderLoadoutCategory(category) {
     } else {
         for (const itemId of inventoryKeys) {
             const amount = inventoryCounts[itemId];
-            const wrapper = document.createElement("div");
-            wrapper.appendChild(
-                makeItemRow(category, itemId, `Ausrüsten x${amount}`, () => equipItem(category, itemId))
+            const disabled = !canEquipMore(category, meta, loadout);
+
+            const row = makeItemRow(
+                category,
+                itemId,
+                `Ausrüsten x${amount}`,
+                () => equipItem(category, itemId)
             );
-            inventoryContainer.appendChild(wrapper.firstChild);
+
+            if (disabled) {
+                row.querySelector("button").disabled = true;
+                row.querySelector("button").classList.add("secondary");
+            }
+
+            inventoryContainer.appendChild(row);
         }
     }
 
@@ -266,6 +322,8 @@ function renderLoadout() {
     loadoutGrid.appendChild(renderLoadoutCategory("generators"));
     loadoutGrid.appendChild(renderLoadoutCategory("extras"));
     loadoutGrid.appendChild(renderLoadoutCategory("drones"));
+    loadoutGrid.appendChild(renderLoadoutCategory("droneLasers"));
+    loadoutGrid.appendChild(renderLoadoutCategory("droneGenerators"));
 }
 
 function renderInventoryPanel() {

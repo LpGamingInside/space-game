@@ -8,7 +8,6 @@ window.GAME_DATA = {
             laserSlots: 1,
             generatorSlots: 1,
             extraSlots: 1,
-            droneSlots: 2,
             color: "#60a5fa",
             priceCredits: 0,
             priceCrystals: 0
@@ -22,7 +21,6 @@ window.GAME_DATA = {
             laserSlots: 2,
             generatorSlots: 2,
             extraSlots: 1,
-            droneSlots: 3,
             color: "#22c55e",
             priceCredits: 3500,
             priceCrystals: 120
@@ -36,7 +34,6 @@ window.GAME_DATA = {
             laserSlots: 3,
             generatorSlots: 2,
             extraSlots: 2,
-            droneSlots: 4,
             color: "#f97316",
             priceCredits: 9000,
             priceCrystals: 300
@@ -60,19 +57,17 @@ window.GAME_DATA = {
             { id: "REP-1", name: "Repair Module I", rangeBonus: 0, hpBonus: 25, priceCredits: 1400, priceCrystals: 25 }
         ],
         drones: [{
-                id: "DRN-1",
+                id: "DRN-A",
                 name: "Drone Alpha",
-                damageBonus: 2,
-                hpBonus: 10,
+                slotBonus: 1,
                 color: "#93c5fd",
                 priceCredits: 1500,
                 priceCrystals: 40
             },
             {
-                id: "DRN-2",
+                id: "DRN-B",
                 name: "Drone Beta",
-                damageBonus: 4,
-                hpBonus: 20,
+                slotBonus: 2,
                 color: "#f9a8d4",
                 priceCredits: 3800,
                 priceCrystals: 90
@@ -80,11 +75,159 @@ window.GAME_DATA = {
         ]
     },
 
+    maps: [{
+            id: "1-1",
+            name: "Orbit Alpha",
+            gates: [{
+                id: "gate-1-1-east",
+                x: 4750,
+                y: 2500,
+                radius: 70,
+                targetMap: "1-2",
+                targetX: 250,
+                targetY: 2500,
+                label: "Gate 1-2"
+            }]
+        },
+        {
+            id: "1-2",
+            name: "Red Nebula",
+            gates: [{
+                    id: "gate-1-2-west",
+                    x: 250,
+                    y: 2500,
+                    radius: 70,
+                    targetMap: "1-1",
+                    targetX: 4650,
+                    targetY: 2500,
+                    label: "Gate 1-1"
+                },
+                {
+                    id: "gate-1-2-east",
+                    x: 4750,
+                    y: 2500,
+                    radius: 70,
+                    targetMap: "2-1",
+                    targetX: 250,
+                    targetY: 2500,
+                    label: "Gate 2-1"
+                }
+            ]
+        },
+        {
+            id: "2-1",
+            name: "Outer Fringe",
+            gates: [{
+                id: "gate-2-1-west",
+                x: 250,
+                y: 2500,
+                radius: 70,
+                targetMap: "1-2",
+                targetX: 4650,
+                targetY: 2500,
+                label: "Gate 1-2"
+            }]
+        }
+    ],
+
+    npcSpawns: [{
+            spawnId: "npc-1",
+            mapId: "1-1",
+            type: "Scout",
+            x: 900,
+            y: 900,
+            radius: 18,
+            hp: 70,
+            maxHp: 70,
+            color: "#f59e0b",
+            moveSpeed: 1.4,
+            chaseSpeed: 2.2,
+            damage: 5,
+            rewardCredits: 90,
+            rewardCrystals: 3,
+            rewardXp: 25,
+            respawnMs: 6000
+        },
+        {
+            spawnId: "npc-2",
+            mapId: "1-1",
+            type: "Fighter",
+            x: 1600,
+            y: 1300,
+            radius: 22,
+            hp: 120,
+            maxHp: 120,
+            color: "#fb923c",
+            moveSpeed: 1.0,
+            chaseSpeed: 1.8,
+            damage: 8,
+            rewardCredits: 150,
+            rewardCrystals: 5,
+            rewardXp: 45,
+            respawnMs: 7000
+        },
+        {
+            spawnId: "npc-3",
+            mapId: "1-2",
+            type: "Destroyer",
+            x: 2200,
+            y: 1600,
+            radius: 28,
+            hp: 220,
+            maxHp: 220,
+            color: "#ef4444",
+            moveSpeed: 0.7,
+            chaseSpeed: 1.4,
+            damage: 14,
+            rewardCredits: 320,
+            rewardCrystals: 10,
+            rewardXp: 90,
+            respawnMs: 9000
+        },
+        {
+            spawnId: "npc-4",
+            mapId: "2-1",
+            type: "Scout",
+            x: 1200,
+            y: 2200,
+            radius: 18,
+            hp: 70,
+            maxHp: 70,
+            color: "#f59e0b",
+            moveSpeed: 1.4,
+            chaseSpeed: 2.2,
+            damage: 5,
+            rewardCredits: 90,
+            rewardCrystals: 3,
+            rewardXp: 25,
+            respawnMs: 6000
+        },
+        {
+            spawnId: "npc-5",
+            mapId: "2-1",
+            type: "Destroyer",
+            x: 3000,
+            y: 1400,
+            radius: 28,
+            hp: 220,
+            maxHp: 220,
+            color: "#ef4444",
+            moveSpeed: 0.7,
+            chaseSpeed: 1.4,
+            damage: 14,
+            rewardCredits: 320,
+            rewardCrystals: 10,
+            rewardXp: 90,
+            respawnMs: 9000
+        }
+    ],
+
     starterInventory: {
         credits: 1000,
         crystals: 100,
         xp: 0,
         level: 1,
+        currentMapId: "1-1",
         ownedShips: ["phoenix"],
         activeShipId: "phoenix",
         inventory: {
@@ -98,58 +241,10 @@ window.GAME_DATA = {
                 lasers: ["LF-1"],
                 generators: ["G3N-1"],
                 extras: [],
-                drones: []
+                drones: [],
+                droneLasers: [],
+                droneGenerators: []
             }
         }
-    },
-
-    npcs: [{
-            id: 1,
-            type: "Scout",
-            x: 900,
-            y: 900,
-            radius: 18,
-            hp: 70,
-            maxHp: 70,
-            color: "#f59e0b",
-            moveSpeed: 1.4,
-            chaseSpeed: 2.2,
-            damage: 5,
-            rewardCredits: 90,
-            rewardCrystals: 3,
-            rewardXp: 25
-        },
-        {
-            id: 2,
-            type: "Fighter",
-            x: 1400,
-            y: 1100,
-            radius: 22,
-            hp: 120,
-            maxHp: 120,
-            color: "#fb923c",
-            moveSpeed: 1.0,
-            chaseSpeed: 1.8,
-            damage: 8,
-            rewardCredits: 150,
-            rewardCrystals: 5,
-            rewardXp: 45
-        },
-        {
-            id: 3,
-            type: "Destroyer",
-            x: 1800,
-            y: 1500,
-            radius: 28,
-            hp: 220,
-            maxHp: 220,
-            color: "#ef4444",
-            moveSpeed: 0.7,
-            chaseSpeed: 1.4,
-            damage: 14,
-            rewardCredits: 320,
-            rewardCrystals: 10,
-            rewardXp: 90
-        }
-    ]
+    }
 };

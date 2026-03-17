@@ -10,7 +10,21 @@
 
 <body>
     <div class="game-hud" id="hud">Verbinde...</div>
+
+    <div id="debugPanel" class="debug-panel">
+        <div class="debug-title">Debug</div>
+        <div class="debug-buttons">
+            <button class="debug-btn" id="dbgCredits">+10k Credits</button>
+            <button class="debug-btn" id="dbgCrystals">+1k Kristalle</button>
+            <button class="debug-btn" id="dbgLevel">+1 Level</button>
+            <button class="debug-btn" id="dbgHeal">Heal</button>
+            <button class="debug-btn" id="dbgGod">God Mode: AUS</button>
+            <button class="debug-btn" id="dbgKillTarget">Kill Target</button>
+        </div>
+    </div>
+
     <canvas class="minimap" id="minimap" width="220" height="220"></canvas>
+    <div class="hotbar" id="hotbar"></div>
     <canvas id="gameCanvas"></canvas>
 
     <script src="/socket.io/socket.io.js"></script>

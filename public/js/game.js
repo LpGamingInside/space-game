@@ -7,6 +7,13 @@ const minimapCanvas = document.getElementById("minimap");
 const minimapCtx = minimapCanvas.getContext("2d");
 
 const hud = document.getElementById("hud");
+const hotbar = document.getElementById("hotbar");
+const debugCreditsBtn = document.getElementById("dbgCredits");
+const debugCrystalsBtn = document.getElementById("dbgCrystals");
+const debugLevelBtn = document.getElementById("dbgLevel");
+const debugHealBtn = document.getElementById("dbgHeal");
+const debugGodBtn = document.getElementById("dbgGod");
+const debugKillTargetBtn = document.getElementById("dbgKillTarget");
 
 const WORLD_WIDTH = 5000;
 const WORLD_HEIGHT = 5000;
@@ -25,10 +32,11 @@ const activeShip = getActiveShip(save);
 //let credits = save.credits;
 //let crystals = save.crystals;
 
-let credits = 9999999;
-let crystals = 9999999;
+let credits = 999999999;
+let crystals = 999999999;
 let xp = save.xp;
 let level = save.level;
+let currentMapId = save.currentMapId || "1-1";
 
 const lasers = [];
 const npcLasers = [];
@@ -37,6 +45,8 @@ const explosions = [];
 let selectedNpcId = null;
 let attacking = false;
 let lastShotTime = 0;
+let gateCooldownUntil = 0;
+let godMode = false;
 
 let mouseX = 0;
 let mouseY = 0;
@@ -48,15 +58,19 @@ let mouseDownTime = 0;
 let movedWhileHolding = false;
 let droneRotation = 0;
 
-const npcs = window.GAME_DATA.npcs.map((npc) => {
+const npcs = window.GAME_DATA.npcSpawns.map((spawn) => {
     return {
-        ...npc,
-        homeX: npc.x,
-        homeY: npc.y,
+        ...spawn,
+        homeX: spawn.x,
+        homeY: spawn.y,
+        x: spawn.x,
+        y: spawn.y,
         moveAngle: Math.random() * Math.PI * 2,
         roamRadius: 180 + Math.random() * 80,
         lastAttackTime: 0,
-        state: "roam"
+        state: "roam",
+        alive: true,
+        respawnAt: 0
     };
 });
 
@@ -68,7 +82,6 @@ function getLoadoutStats() {
         laserSlots: 1,
         generatorSlots: 1,
         extraSlots: 1,
-        droneSlots: 0,
         color: "#60a5fa"
     };
 
@@ -98,12 +111,14 @@ function getLoadoutStats() {
         }
     }
 
-    for (const droneId of loadout.drones) {
-        const item = getEquipmentById("drones", droneId);
-        if (item) {
-            hp += item.hpBonus || 0;
-            damage += item.damageBonus || 0;
-        }
+    for (const laserId of loadout.droneLasers) {
+        const item = getEquipmentById("lasers", laserId);
+        if (item) damage += item.damageBonus || 0;
+    }
+
+    for (const generatorId of loadout.droneGenerators) {
+        const item = getEquipmentById("generators", generatorId);
+        if (item) hp += item.hpBonus || 0;
     }
 
     return {
@@ -113,6 +128,24 @@ function getLoadoutStats() {
         range,
         cooldown: 400
     };
+}
+
+function getCurrentMapData() {
+    return window.GAME_DATA.maps.find(map => map.id === currentMapId) || window.GAME_DATA.maps[0];
+}
+
+function getCurrentMapName() {
+    const map = getCurrentMapData();
+    return map ? map.name : currentMapId;
+}
+
+function getCurrentGates() {
+    const map = getCurrentMapData();
+    return map ? map.gates : [];
+}
+
+function getAliveNpcsOnCurrentMap() {
+    return npcs.filter(npc => npc.mapId === currentMapId && npc.alive);
 }
 
 function resizeCanvas() {
@@ -145,6 +178,7 @@ function persistSave() {
     save.crystals = crystals;
     save.xp = xp;
     save.level = level;
+    save.currentMapId = currentMapId;
     saveGame(save);
 }
 
@@ -173,6 +207,49 @@ function addRewards(npc) {
     }
 
     persistSave();
+}
+
+function addDebugCredits() {
+    credits += 10000;
+    persistSave();
+}
+
+function addDebugCrystals() {
+    crystals += 1000;
+    persistSave();
+}
+
+function addDebugLevel() {
+    level += 1;
+    xp = 0;
+
+    const me = getMyPlayer();
+    if (me) {
+        me.maxHp += 20;
+        me.hp = me.maxHp;
+        me.damage += 2;
+    }
+
+    persistSave();
+}
+
+function debugHealPlayer() {
+    const me = getMyPlayer();
+    if (!me) return;
+
+    me.hp = me.maxHp;
+}
+
+function toggleGodMode() {
+    godMode = !godMode;
+    debugGodBtn.textContent = godMode ? "God Mode: AN" : "God Mode: AUS";
+}
+
+function debugKillTarget() {
+    const npc = getSelectedNpc();
+    if (!npc) return;
+
+    npc.hp = 0;
 }
 
 function getMyPlayer() {
@@ -206,7 +283,7 @@ function distanceBetween(aX, aY, bX, bY) {
 }
 
 function getNpcAtPosition(worldX, worldY) {
-    for (const npc of npcs) {
+    for (const npc of getAliveNpcsOnCurrentMap()) {
         const dx = worldX - npc.x;
         const dy = worldY - npc.y;
         if (Math.hypot(dx, dy) <= npc.radius) return npc;
@@ -216,7 +293,7 @@ function getNpcAtPosition(worldX, worldY) {
 
 function getSelectedNpc() {
     if (selectedNpcId === null) return null;
-    return npcs.find(npc => npc.id === selectedNpcId) || null;
+    return getAliveNpcsOnCurrentMap().find(npc => npc.spawnId === selectedNpcId) || null;
 }
 
 function createExplosion(x, y, color = "#ff9933", maxRadius = 36) {
@@ -246,14 +323,38 @@ function drawShipSprite(x, y, angle, color, isMe, isDead) {
     ctx.translate(x, y);
     ctx.rotate(angle);
 
-    ctx.beginPath();
-    ctx.moveTo(0, -24);
-    ctx.lineTo(15, 16);
-    ctx.lineTo(0, 8);
-    ctx.lineTo(-15, 16);
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
+    if ((activeShip && activeShip.id) === "phoenix") {
+        ctx.beginPath();
+        ctx.moveTo(0, -24);
+        ctx.lineTo(14, 16);
+        ctx.lineTo(0, 7);
+        ctx.lineTo(-14, 16);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+    } else if ((activeShip && activeShip.id) === "vanguard") {
+        ctx.beginPath();
+        ctx.moveTo(0, -24);
+        ctx.lineTo(18, -2);
+        ctx.lineTo(10, 18);
+        ctx.lineTo(0, 10);
+        ctx.lineTo(-10, 18);
+        ctx.lineTo(-18, -2);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+    } else {
+        ctx.beginPath();
+        ctx.moveTo(0, -28);
+        ctx.lineTo(20, -6);
+        ctx.lineTo(14, 20);
+        ctx.lineTo(0, 12);
+        ctx.lineTo(-14, 20);
+        ctx.lineTo(-20, -6);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+    }
 
     ctx.beginPath();
     ctx.moveTo(0, -10);
@@ -263,9 +364,6 @@ function drawShipSprite(x, y, angle, color, isMe, isDead) {
     ctx.closePath();
     ctx.fillStyle = "rgba(255,255,255,0.22)";
     ctx.fill();
-
-    ctx.fillStyle = "#0f172a";
-    ctx.fillRect(-4, 8, 8, 12);
 
     if (isMe) {
         ctx.strokeStyle = "#ffffff";
@@ -287,7 +385,7 @@ function drawDrones(player, camera, isMe) {
 
     const centerX = player.x - camera.x;
     const centerY = player.y - camera.y;
-    const orbitRadius = 34 + count * 2;
+    const orbitRadius = 36 + count * 2;
 
     for (let i = 0; i < count; i++) {
         const droneId = droneIds[i];
@@ -336,40 +434,101 @@ function drawPlayerHpBar(player, camera, isMe) {
     ctx.fillRect(screenX - barWidth / 2, screenY - 40, barWidth * hpRatio, barHeight);
 }
 
-function drawNpc(npc, camera) {
-    const screenX = npc.x - camera.x;
-    const screenY = npc.y - camera.y;
+function drawNpcSprite(npc, camera) {
+    const x = npc.x - camera.x;
+    const y = npc.y - camera.y;
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    if (npc.type === "Scout") {
+        ctx.beginPath();
+        ctx.moveTo(0, -18);
+        ctx.lineTo(14, 6);
+        ctx.lineTo(0, 14);
+        ctx.lineTo(-14, 6);
+        ctx.closePath();
+        ctx.fillStyle = npc.color;
+        ctx.fill();
+    } else if (npc.type === "Fighter") {
+        ctx.beginPath();
+        ctx.moveTo(0, -22);
+        ctx.lineTo(16, -4);
+        ctx.lineTo(10, 16);
+        ctx.lineTo(0, 10);
+        ctx.lineTo(-10, 16);
+        ctx.lineTo(-16, -4);
+        ctx.closePath();
+        ctx.fillStyle = npc.color;
+        ctx.fill();
+    } else {
+        ctx.beginPath();
+        ctx.moveTo(0, -26);
+        ctx.lineTo(18, -8);
+        ctx.lineTo(14, 16);
+        ctx.lineTo(0, 22);
+        ctx.lineTo(-14, 16);
+        ctx.lineTo(-18, -8);
+        ctx.closePath();
+        ctx.fillStyle = npc.color;
+        ctx.fill();
+    }
 
     ctx.beginPath();
-    ctx.arc(screenX, screenY, npc.radius, 0, Math.PI * 2);
-    ctx.fillStyle = npc.color;
+    ctx.arc(0, 0, Math.max(4, npc.radius * 0.28), 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
     ctx.fill();
 
-    ctx.beginPath();
-    ctx.arc(screenX, screenY, npc.radius * 0.45, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,255,255,0.15)";
-    ctx.fill();
-
-    if (npc.id === selectedNpcId) {
+    if (npc.spawnId === selectedNpcId) {
+        ctx.beginPath();
+        ctx.arc(0, 0, npc.radius + 6, 0, Math.PI * 2);
         ctx.strokeStyle = "#00ff88";
         ctx.lineWidth = 3;
         ctx.stroke();
     }
+
+    ctx.restore();
 
     const barWidth = 56;
     const barHeight = 6;
     const hpRatio = npc.hp / npc.maxHp;
 
     ctx.fillStyle = "#222";
-    ctx.fillRect(screenX - barWidth / 2, screenY - 40, barWidth, barHeight);
+    ctx.fillRect(x - barWidth / 2, y - 40, barWidth, barHeight);
 
     ctx.fillStyle = "#ff4444";
-    ctx.fillRect(screenX - barWidth / 2, screenY - 40, barWidth * hpRatio, barHeight);
+    ctx.fillRect(x - barWidth / 2, y - 40, barWidth * hpRatio, barHeight);
 
     ctx.fillStyle = "#ffffff";
     ctx.font = "12px Arial";
     ctx.textAlign = "center";
-    ctx.fillText(npc.type, screenX, screenY - npc.radius - 16);
+    ctx.fillText(npc.type, x, y - npc.radius - 16);
+}
+
+function drawGates(camera) {
+    const gates = getCurrentGates();
+
+    for (const gate of gates) {
+        const x = gate.x - camera.x;
+        const y = gate.y - camera.y;
+
+        ctx.beginPath();
+        ctx.arc(x, y, gate.radius, 0, Math.PI * 2);
+        ctx.strokeStyle = "#38bdf8";
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(x, y, gate.radius - 14, 0, Math.PI * 2);
+        ctx.strokeStyle = "#93c5fd";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = "#cbd5e1";
+        ctx.font = "12px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(gate.label, x, y + gate.radius + 18);
+    }
 }
 
 function drawLasers(camera) {
@@ -417,14 +576,21 @@ function drawMinimap() {
 
     const me = getMyPlayer();
 
-    for (const npc of npcs) {
+    for (const npc of getAliveNpcsOnCurrentMap()) {
         const x = (npc.x / WORLD_WIDTH) * minimapCanvas.width;
         const y = (npc.y / WORLD_HEIGHT) * minimapCanvas.height;
 
-        minimapCtx.fillStyle = npc.id === selectedNpcId ? "#00ff88" : npc.color;
+        minimapCtx.fillStyle = npc.spawnId === selectedNpcId ? "#00ff88" : npc.color;
         minimapCtx.beginPath();
         minimapCtx.arc(x, y, 3, 0, Math.PI * 2);
         minimapCtx.fill();
+    }
+
+    for (const gate of getCurrentGates()) {
+        const x = (gate.x / WORLD_WIDTH) * minimapCanvas.width;
+        const y = (gate.y / WORLD_HEIGHT) * minimapCanvas.height;
+        minimapCtx.fillStyle = "#38bdf8";
+        minimapCtx.fillRect(x - 3, y - 3, 6, 6);
     }
 
     for (const id in players) {
@@ -449,6 +615,26 @@ function drawMinimap() {
         minimapCtx.strokeStyle = "#93c5fd";
         minimapCtx.lineWidth = 1;
         minimapCtx.strokeRect(camX, camY, camW, camH);
+    }
+}
+
+function renderHotbar() {
+    ensureShipLoadout(save, save.activeShipId);
+    const extras = save.loadouts[save.activeShipId].extras;
+    hotbar.innerHTML = "";
+
+    for (let i = 0; i < 4; i++) {
+        const extraId = extras[i];
+        const item = extraId ? getEquipmentById("extras", extraId) : null;
+
+        const div = document.createElement("div");
+        div.className = "hotbar-slot";
+        div.innerHTML = `
+            <div class="hotbar-key">${i + 1}</div>
+            <div style="font-size:22px;">${item ? "✦" : "·"}</div>
+            <div>${item ? item.name : "Leer"}</div>
+        `;
+        hotbar.appendChild(div);
     }
 }
 
@@ -515,6 +701,9 @@ function updateNpcMovement() {
     const me = getMyPlayer();
 
     for (const npc of npcs) {
+        if (!npc.alive) continue;
+        if (npc.mapId !== currentMapId) continue;
+
         let targetXLocal = npc.homeX;
         let targetYLocal = npc.homeY;
         let speed = npc.moveSpeed;
@@ -607,8 +796,10 @@ function updateCombat() {
         addRewards(npc);
         createExplosion(npc.x, npc.y, npc.color, 42);
 
-        const index = npcs.findIndex(n => n.id === npc.id);
-        if (index !== -1) npcs.splice(index, 1);
+        npc.alive = false;
+        npc.respawnAt = Date.now() + npc.respawnMs;
+        npc.state = "roam";
+        npc.hp = 0;
 
         selectedNpcId = null;
         attacking = false;
@@ -621,7 +812,7 @@ function updateNpcCombat() {
 
     const now = Date.now();
 
-    for (const npc of npcs) {
+    for (const npc of getAliveNpcsOnCurrentMap()) {
         const distance = distanceBetween(npc.x, npc.y, me.x, me.y);
 
         if (distance > NPC_ATTACK_RANGE) continue;
@@ -637,10 +828,49 @@ function updateNpcCombat() {
             expiresAt: now + 120
         });
 
-        me.hp -= npc.damage;
+        if (!godMode) {
+            me.hp -= npc.damage;
+        }
 
         if (me.hp <= 0) {
             killPlayer();
+            break;
+        }
+    }
+}
+
+function updateNpcRespawns() {
+    const now = Date.now();
+
+    for (const npc of npcs) {
+        if (npc.alive) continue;
+        if (now < npc.respawnAt) continue;
+
+        npc.alive = true;
+        npc.hp = npc.maxHp;
+        npc.x = npc.homeX;
+        npc.y = npc.homeY;
+        npc.state = "roam";
+        npc.moveAngle = Math.random() * Math.PI * 2;
+    }
+}
+
+function updateGateTravel() {
+    const me = getMyPlayer();
+    if (!me || me.isDead) return;
+    if (Date.now() < gateCooldownUntil) return;
+
+    for (const gate of getCurrentGates()) {
+        const distance = distanceBetween(me.x, me.y, gate.x, gate.y);
+
+        if (distance <= gate.radius) {
+            currentMapId = gate.targetMap;
+            me.x = gate.targetX;
+            me.y = gate.targetY;
+            selectedNpcId = null;
+            attacking = false;
+            gateCooldownUntil = Date.now() + 1000;
+            persistSave();
             break;
         }
     }
@@ -718,7 +948,8 @@ function updateHud() {
     }
 
     let text = "";
-    text += `Schiff: ${activeShip ? activeShip.name : "-"}`;
+    text += `Map: ${getCurrentMapName()}`;
+    text += ` | Schiff: ${activeShip ? activeShip.name : "-"}`;
     text += ` | Level: ${level}`;
     text += ` | XP: ${xp}/${getXpNeededForLevel(level)}`;
     text += ` | HP: ${me.hp}/${me.maxHp}`;
@@ -729,7 +960,7 @@ function updateHud() {
 
     const npc = getSelectedNpc();
     if (npc) {
-        text += ` | Ziel: ${npc.type} #${npc.id} (${npc.hp}/${npc.maxHp} HP)`;
+        text += ` | Ziel: ${npc.type} (${npc.hp}/${npc.maxHp} HP)`;
     }
 
     if (attacking) text += " | Angriff aktiv";
@@ -755,8 +986,10 @@ function gameLoop() {
     ctx.lineWidth = 4;
     ctx.strokeRect(-camera.x, -camera.y, WORLD_WIDTH, WORLD_HEIGHT);
 
-    for (const npc of npcs) {
-        drawNpc(npc, camera);
+    drawGates(camera);
+
+    for (const npc of getAliveNpcsOnCurrentMap()) {
+        drawNpcSprite(npc, camera);
     }
 
     drawLasers(camera);
@@ -783,6 +1016,7 @@ function gameLoop() {
     }
 
     drawMinimap();
+    renderHotbar();
     updateHud();
     requestAnimationFrame(gameLoop);
 }
@@ -853,7 +1087,7 @@ canvas.addEventListener("mousedown", (event) => {
     const clickedNpc = getNpcAtPosition(pos.x, pos.y);
 
     if (clickedNpc) {
-        selectedNpcId = clickedNpc.id;
+        selectedNpcId = clickedNpc.spawnId;
         mouseDown = false;
         targetMode = false;
         return;
@@ -873,7 +1107,7 @@ canvas.addEventListener("dblclick", (event) => {
     const clickedNpc = getNpcAtPosition(pos.x, pos.y);
 
     if (clickedNpc) {
-        selectedNpcId = clickedNpc.id;
+        selectedNpcId = clickedNpc.spawnId;
         attacking = true;
     }
 });
@@ -927,6 +1161,30 @@ window.addEventListener("keydown", (event) => {
     }
 });
 
+debugCreditsBtn.addEventListener("click", () => {
+    addDebugCredits();
+});
+
+debugCrystalsBtn.addEventListener("click", () => {
+    addDebugCrystals();
+});
+
+debugLevelBtn.addEventListener("click", () => {
+    addDebugLevel();
+});
+
+debugHealBtn.addEventListener("click", () => {
+    debugHealPlayer();
+});
+
+debugGodBtn.addEventListener("click", () => {
+    toggleGodMode();
+});
+
+debugKillTargetBtn.addEventListener("click", () => {
+    debugKillTarget();
+});
+
 window.addEventListener("resize", resizeCanvas);
 
 resizeCanvas();
@@ -938,6 +1196,8 @@ setInterval(updateNpcCombat, 1000 / 60);
 setInterval(updateLasers, 1000 / 60);
 setInterval(updateExplosions, 1000 / 60);
 setInterval(updateRespawn, 200);
+setInterval(updateNpcRespawns, 500);
+setInterval(updateGateTravel, 100);
 setInterval(updateDroneAnimation, 1000 / 60);
 
 gameLoop();
