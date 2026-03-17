@@ -72,10 +72,11 @@
             };
         }
 
-        function drawStars() {
-            for (let i = 0; i < 120; i++) {
-                const x = (i * 97) % canvas.width;
-                const y = (i * 53) % canvas.height;
+        function drawStars(camera) {
+            for (let i = 0; i < 200; i++) {
+                const x = ((i * 97) % 2000) - (camera.x % 2000);
+                const y = ((i * 53) % 2000) - (camera.y % 2000);
+
                 ctx.fillStyle = "white";
                 ctx.fillRect(x, y, 2, 2);
             }
@@ -103,6 +104,22 @@
             }
 
             ctx.restore();
+        }
+
+        function getCameraOffset() {
+            if (!myId || !players[myId]) {
+                return {
+                    x: 0,
+                    y: 0
+                };
+            }
+
+            const me = players[myId];
+
+            return {
+                x: me.x - canvas.width / 2,
+                y: me.y - canvas.height / 2
+            };
         }
 
         function updateMovement() {
@@ -168,13 +185,17 @@
 
         function gameLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            drawStars();
+
+            const camera = getCameraOffset();
+
+            drawStars(camera);
 
             for (const id in players) {
                 const p = players[id];
+
                 drawShip(
-                    p.x,
-                    p.y,
+                    p.x - camera.x,
+                    p.y - camera.y,
                     p.angle || 0,
                     p.color || "#4da6ff",
                     id === myId
