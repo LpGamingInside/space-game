@@ -14,6 +14,7 @@
             overflow: hidden;
             font-family: Arial, sans-serif;
             color: white;
+            user-select: none;
         }
         
         #hud {
@@ -28,6 +29,7 @@
         
         canvas {
             display: block;
+            cursor: crosshair;
             background: radial-gradient(circle at 20% 20%, #1a1a2e 0%, #050510 35%, #000000 100%);
         }
     </style>
@@ -48,16 +50,26 @@
         const players = {};
         let myId = null;
 
-        const keys = {
-            w: false,
-            a: false,
-            s: false,
-            d: false
-        };
+        let mouseX = 0;
+        let mouseY = 0;
+        let mouseHeld = false;
+        let clickMoveActive = false;
+        let clickTargetX = 0;
+        let clickTargetY = 0;
+
+        const SHIP_SPEED = 4;
 
         function resizeCanvas() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
+        }
+
+        function getMousePos(event) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: event.clientX - rect.left,
+                y: event.clientY - rect.top
+            };
         }
 
         function drawStars() {
@@ -69,15 +81,16 @@
             }
         }
 
-        function drawShip(x, y, color, isMe) {
+        function drawShip(x, y, angle, color, isMe) {
             ctx.save();
             ctx.translate(x, y);
+            ctx.rotate(angle);
 
             ctx.beginPath();
-            ctx.moveTo(0, -15);
-            ctx.lineTo(10, 12);
+            ctx.moveTo(0, -18);
+            ctx.lineTo(11, 12);
             ctx.lineTo(0, 6);
-            ctx.lineTo(-10, 12);
+            ctx.lineTo(-11, 12);
             ctx.closePath();
 
             ctx.fillStyle = color;
@@ -92,55 +105,89 @@
             ctx.restore();
         }
 
+        function clampPlayer(p) {
+            p.x = Math.max(12, Math.min(canvas.width - 12, p.x));
+            p.y = Math.max(18, Math.min(canvas.height - 12, p.y));
+        }
+
+        function moveTowardsTarget(targetX, targetY) {
+            if (!myId || !players[myId]) return;
+
+            const me = players[myId];
+            const dx = targetX - me.x;
+            const dy = targetY - me.y;
+            const distance = Math.hypot(dx, dy);
+
+            if (distance < 1) return;
+
+            const angle = Math.atan2(dy, dx) + Math.PI / 2;
+            me.angle = angle;
+
+            const step = Math.min(SHIP_SPEED, distance);
+            me.x += (dx / distance) * step;
+            me.y += (dy / distance) * step;
+
+            clampPlayer(me);
+
+            socket.emit("move", {
+                x: me.x,
+                y: me.y,
+                angle: me.angle
+            });
+        }
+
+        function updateMovement() {
+            if (!myId || !players[myId]) return;
+
+            if (mouseHeld) {
+                moveTowardsTarget(mouseX, mouseY);
+                return;
+            }
+
+            if (clickMoveActive) {
+                const me = players[myId];
+                const dx = clickTargetX - me.x;
+                const dy = clickTargetY - me.y;
+                const distance = Math.hypot(dx, dy);
+
+                if (distance <= SHIP_SPEED) {
+                    me.x = clickTargetX;
+                    me.y = clickTargetY;
+                    clampPlayer(me);
+                    socket.emit("move", {
+                        x: me.x,
+                        y: me.y,
+                        angle: me.angle || 0
+                    });
+                    clickMoveActive = false;
+                    return;
+                }
+
+                moveTowardsTarget(clickTargetX, clickTargetY);
+            }
+        }
+
         function gameLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             drawStars();
 
             for (const id in players) {
                 const p = players[id];
-                drawShip(p.x, p.y, p.color || "#4da6ff", id === myId);
+                drawShip(
+                    p.x,
+                    p.y,
+                    p.angle || 0,
+                    p.color || "#4da6ff",
+                    id === myId
+                );
             }
 
             requestAnimationFrame(gameLoop);
         }
 
-        function updateMovement() {
-            if (!myId || !players[myId]) return;
-
-            const speed = 4;
-            let moved = false;
-
-            if (keys.w) {
-                players[myId].y -= speed;
-                moved = true;
-            }
-            if (keys.s) {
-                players[myId].y += speed;
-                moved = true;
-            }
-            if (keys.a) {
-                players[myId].x -= speed;
-                moved = true;
-            }
-            if (keys.d) {
-                players[myId].x += speed;
-                moved = true;
-            }
-
-            players[myId].x = Math.max(10, Math.min(canvas.width - 10, players[myId].x));
-            players[myId].y = Math.max(15, Math.min(canvas.height - 12, players[myId].y));
-
-            if (moved) {
-                socket.emit("move", {
-                    x: players[myId].x,
-                    y: players[myId].y
-                });
-            }
-        }
-
         socket.on("connect", () => {
             myId = socket.id;
-            hud.textContent = "Verbunden als: " + myId;
+            hud.textContent = "Verbunden";
         });
 
         socket.on("currentPlayers", (serverPlayers) => {
@@ -154,15 +201,19 @@
         });
 
         socket.on("playerMoved", (player) => {
+            if (player.id === myId) return;
+
             if (!players[player.id]) {
                 players[player.id] = {
                     x: player.x,
                     y: player.y,
+                    angle: player.angle || 0,
                     color: "#4da6ff"
                 };
             } else {
                 players[player.id].x = player.x;
                 players[player.id].y = player.y;
+                players[player.id].angle = player.angle || 0;
             }
         });
 
@@ -170,14 +221,42 @@
             delete players[id];
         });
 
-        window.addEventListener("keydown", (e) => {
-            const key = e.key.toLowerCase();
-            if (key in keys) keys[key] = true;
+        canvas.addEventListener("mousemove", (event) => {
+            const pos = getMousePos(event);
+            mouseX = pos.x;
+            mouseY = pos.y;
         });
 
-        window.addEventListener("keyup", (e) => {
-            const key = e.key.toLowerCase();
-            if (key in keys) keys[key] = false;
+        canvas.addEventListener("mousedown", (event) => {
+            if (event.button !== 0) return;
+
+            const pos = getMousePos(event);
+            mouseX = pos.x;
+            mouseY = pos.y;
+
+            mouseHeld = true;
+            clickMoveActive = false;
+        });
+
+        canvas.addEventListener("mouseup", (event) => {
+            if (event.button !== 0) return;
+
+            const pos = getMousePos(event);
+            mouseX = pos.x;
+            mouseY = pos.y;
+
+            mouseHeld = false;
+        });
+
+        canvas.addEventListener("click", (event) => {
+            const pos = getMousePos(event);
+            clickTargetX = pos.x;
+            clickTargetY = pos.y;
+            clickMoveActive = true;
+        });
+
+        canvas.addEventListener("mouseleave", () => {
+            mouseHeld = false;
         });
 
         window.addEventListener("resize", resizeCanvas);

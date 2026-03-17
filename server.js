@@ -23,10 +23,12 @@ io.on("connection", (socket) => {
     players[socket.id] = {
         x: 400,
         y: 300,
+        angle: 0,
         color: "#4da6ff"
     };
 
     socket.emit("currentPlayers", players);
+
     socket.broadcast.emit("newPlayer", {
         id: socket.id,
         ...players[socket.id]
@@ -37,11 +39,13 @@ io.on("connection", (socket) => {
 
         players[socket.id].x = data.x;
         players[socket.id].y = data.y;
+        players[socket.id].angle = data.angle ? ? 0;
 
-        io.emit("playerMoved", {
+        socket.broadcast.emit("playerMoved", {
             id: socket.id,
             x: data.x,
-            y: data.y
+            y: data.y,
+            angle: data.angle ? ? 0
         });
     });
 
